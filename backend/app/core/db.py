@@ -5,6 +5,7 @@ Reglas:
 - Convención de nombres de restricciones para que Alembic genere migraciones estables.
 - Tipos numéricos estándar: ``Money`` y ``Qty`` (Numeric(18,4)), ``Coef`` (Numeric(18,6)) y
   ``Pct`` (Numeric(9,6), FRACCIÓN: 0.05 = 5 %).
+- Fechas con hora: ``UTCDateTime`` (siempre UTC con zona, en SQLite y en PostgreSQL).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, MetaData, Numeric, String, create_engine, event
+from sqlalchemy import DateTime, Enum, MetaData, Numeric, String, TypeDecorator, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -38,6 +39,28 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class UTCDateTime(TypeDecorator[datetime]):
+    """``DateTime(timezone=True)`` que SIEMPRE entrega datetimes UTC con zona.
+
+    SQLite no guarda la zona (devuelve valores naive) y PostgreSQL los devuelve en la zona de la
+    sesión (p. ej. -05:00): sin normalizar, la API serializaría el mismo instante de tres formas
+    y el frontend interpretaría los naive como hora local. Al guardar: naive = UTC; al leer: UTC.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, _dialect: Any) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, _dialect: Any) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
@@ -45,9 +68,9 @@ class Base(DeclarativeBase):
 class TimestampMixin:
     """Campos de auditoría básica. ``created_by``/``updated_by`` se llenan solos (ver abajo)."""
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+        UTCDateTime(), default=utcnow, onupdate=utcnow, nullable=False
     )
     created_by: Mapped[str | None] = mapped_column(String(150))
     updated_by: Mapped[str | None] = mapped_column(String(150))

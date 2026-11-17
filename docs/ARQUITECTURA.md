@@ -97,6 +97,15 @@ BORRADOR --aprobar (admin)--> APROBADO --cerrar (admin)--> CERRADO
 - Tipos: `BASE`, `FIC`, `FIV`, `CONTROL`, `OTRO`. Compromisos y ejecución se asocian al
   **presupuesto** (no a la versión) y se cruzan por ítem contra la versión `CONTROL` aprobada vigente.
 - Cada transición queda en `core_audit_log` (APROBAR, CERRAR, COPIAR, RECALCULAR, IMPORTAR, ANULAR).
+- Defensa en profundidad: un listener `before_flush` relee el estado de la versión **en la BD**
+  (con `FOR UPDATE`) y rechaza cualquier escritura sobre versiones no BORRADOR; la única
+  transición permitida desde APROBADO es a CERRADO. Los services cargan la versión con
+  `obtener_version_para_escritura` (bloqueo de fila), así editar y aprobar en paralelo quedan
+  serializados en PostgreSQL (en SQLite las escrituras ya son serializadas).
+- El tipo y la unidad de un insumo usado en versiones aprobadas/cerradas (unidad: usado en
+  cualquier APU/presupuesto/compromiso) no se pueden cambiar: la explosión de una versión
+  aprobada no cambia por editar el maestro. Mejora futura: guardar tipo/unidad en el snapshot
+  `presupuesto_linea_insumo` y permitir reclasificar el maestro sin restricción.
 
 ## 5. Seguridad
 
@@ -106,8 +115,21 @@ BORRADOR --aprobar (admin)--> APROBADO --cerrar (admin)--> CERRADO
   `created_by`/`updated_by` y `registrar_auditoria` toma el usuario de ahí.
 - Producción: `AUTH_PROVIDER=entra` → `EntraIdProvider` valida el token de Entra ID (JWKS),
   aprovisiona el usuario por `oid` (`Usuario.external_id`) y mapea App Roles → `Rol`. Frontend con MSAL.
-- Secretos solo por variables de entorno (en producción, Azure Key Vault). `ENVIRONMENT=production`
-  rechaza el secreto de desarrollo y SQLite.
+- Secretos solo por variables de entorno (en producción, Azure Key Vault). Fuera de
+  `ENVIRONMENT` local/test se exige un `JWT_SECRET` propio de ≥ 32 caracteres (el arranque falla
+  si falta); en local, si no se define, se genera uno aleatorio por máquina
+  (`backend/.jwt_secret.local`, no versionado). `production` además rechaza SQLite.
+- El seed no tiene contraseñas fijas: usa `DEV_*_PASSWORD` o genera una aleatoria y la imprime.
+- docker-compose publica puertos solo en `127.0.0.1` (`BIND_ADDR`) y exige `JWT_SECRET`.
+- Login: bcrypt se ejecuta aunque el usuario no exista (sin oráculo de tiempo). **Pendiente
+  antes de exponer el auth local en red**: rate limiting por IP/usuario y bloqueo temporal (en
+  producción lo cubre Entra ID).
+- Exportaciones Excel: los textos de usuario nunca se escriben como fórmula (`excel.asignar_celda`).
+- Errores de rango de la BD (`DataError`) → 422; enteros de entrada acotados a INTEGER (`Int32`)
+  y valores monetarios a `Numeric(18,4)` (`calculos.asegurar_rango`).
+- Fechas con hora: tipo `UTCDateTime` (UTC con zona en ambos motores).
+- Pruebas contra PostgreSQL: `TEST_DATABASE_URL=postgresql+psycopg://... pytest` (BD dedicada;
+  la CI lo ejecuta en el job `backend-postgres`).
 - Datos: el repositorio solo contiene datos **sintéticos**.
 
 ## 6. Cómo agregar un nuevo módulo (p. ej. `compras`)

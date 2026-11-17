@@ -12,4 +12,5 @@ tests/
 *.sqlite*
 .env
 .env.*
+.jwt_secret.local
 exports/

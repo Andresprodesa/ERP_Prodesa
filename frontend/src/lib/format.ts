@@ -49,11 +49,33 @@ export function fraccionAPct(frac: Dec | null | undefined): string {
   return String(Math.round(n * 10000) / 10000);
 }
 
-/** Normaliza entrada numérica de usuario a string para la API: "1.250,5" -> "1250.5"; "1250.5" -> "1250.5". */
+// Formatos numéricos aceptados (MISMA regla que backend/app/modules/adpro/control/excel.py:parse_decimal):
+const RE_CO_MILES = /^-?\d{1,3}(\.\d{3})+(,\d+)?$/; // "250.000", "1.250,5", "1.250.000,75"
+const RE_COMA_DECIMAL = /^-?\d+,\d+$/; // "1250,5"
+const RE_PUNTO_DECIMAL = /^-?(\d+(\.\d+)?|\.\d+)$/; // "1250.5", "0.25"
+
+/**
+ * Normaliza entrada numérica es-CO a string para la API (punto decimal, sin miles):
+ * "250.000" -> "250000" (punto de miles), "1.250,5" -> "1250.5", "1250,5" -> "1250.5",
+ * "1250.5" -> "1250.5". Devuelve `null` si el formato es ambiguo o inválido (p. ej. "1,250.50"):
+ * nunca adivina un separador, para no registrar valores mil veces mayores o menores.
+ */
+export function parseDecimalCO(s: string): string | null {
+  const t = s.trim().replace(/[\s\u00a0$]/g, "");
+  if (t === "") return "";
+  if (RE_CO_MILES.test(t)) return t.replace(/\./g, "").replace(",", ".");
+  if (RE_COMA_DECIMAL.test(t)) return t.replace(",", ".");
+  if (RE_PUNTO_DECIMAL.test(t)) return t;
+  return null;
+}
+
+/**
+ * Igual que `parseDecimalCO`, pero si el formato no es válido devuelve el texto tal cual: el
+ * backend lo rechaza con 422 (VALIDATION_ERROR) y la pantalla muestra el error.
+ */
 export function decIn(s: string): string {
-  const t = s.trim().replace(/\s/g, "");
-  if (t.includes(",")) return t.replace(/\./g, "").replace(",", ".");
-  return t;
+  const r = parseDecimalCO(s);
+  return r === null ? s.trim() : r;
 }
 
 export function fecha(v: string | null | undefined): string {

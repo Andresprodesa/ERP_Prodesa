@@ -34,6 +34,7 @@ cp ../.env.example ../.env          # opcional; sin .env usa SQLite y valores de
 
 # Tests y lint (obligatorio antes de entregar)
 ./.venv/Scripts/python.exe -m pytest
+TEST_DATABASE_URL=postgresql+psycopg://erp:<pwd>@localhost:5432/<bd_pruebas> ./.venv/Scripts/python.exe -m pytest  # contra PostgreSQL
 ./.venv/Scripts/python.exe -m pytest tests/adpro/apu -q        # solo un submódulo
 ./.venv/Scripts/python.exe -m ruff check app tests && ./.venv/Scripts/python.exe -m ruff format app tests
 
@@ -83,5 +84,10 @@ cd frontend && npm install && npm run dev      # http://localhost:5173 (proxy /a
 - Integración: control delega en el contrato interno de presupuesto (§6) para versiones,
   explosión, resumen e importación; `calculos.participacion_pct` es la única fórmula de
   participación. El precio vigente sale SOLO de `valorizacion` (maestros expone una fachada).
+- v0.2.1: correcciones de la revisión (ver `docs/ROADMAP.md`). Reglas nuevas que todo agente
+  debe respetar: escribir en versiones vía `obtener_version_para_escritura` + `asegurar_editable`;
+  búsquedas con `app.core.query.contiene`; exportar Excel con `excel.escribir_tabla/escribir_pares/
+  asignar_celda` (nunca `ws.cell(value=texto_de_usuario)`); enteros de entrada a INTEGER con
+  `app.core.schemas.Int32`; explosión valorizada con `calculos.cantidad_exacta_insumo`.
 - Pendiente: pantallas de alta/edición de unidades, ciudades, listas de precios, proyectos y EDT
   en el frontend; vista de auditoría; probar el stack Docker con PostgreSQL localmente.

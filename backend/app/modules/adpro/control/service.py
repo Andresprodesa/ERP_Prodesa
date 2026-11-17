@@ -26,9 +26,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.audit import Accion, registrar_auditoria
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.query import contiene
 from app.core.schemas import Page
 from app.modules.adpro.calculos import (
     ZERO,
+    asegurar_rango,
     es_periodo_valido,
     participacion_pct,
     q4,
@@ -451,7 +453,7 @@ def _asignar_lineas(c: Compromiso, lineas: list[CompromisoLineaIn]) -> None:
                 valor_total=vt,
             )
         )
-    c.valor_total = total
+    c.valor_total = asegurar_rango(total, "valor total del compromiso")
 
 
 def _verificar_numero_unico(
@@ -489,12 +491,11 @@ def listar_compromisos(
             Compromiso.id.in_(select(CompromisoLinea.compromiso_id).where(CompromisoLinea.item_id == item_id))
         )
     if q:
-        patron = f"%{q.strip().lower()}%"
         stmt = stmt.where(
             or_(
-                func.lower(Compromiso.numero).like(patron),
-                func.lower(Compromiso.tercero).like(patron),
-                func.lower(Compromiso.descripcion).like(patron),
+                contiene(Compromiso.numero, q),
+                contiene(Compromiso.tercero, q),
+                contiene(Compromiso.descripcion, q),
             )
         )
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -1116,8 +1117,10 @@ def importar_presupuesto(
                 errores.append(
                     ImportErrorFila(fila=f.fila, columna="cantidad", mensaje="La cantidad debe ser >= 0")
                 )
-        except ValueError:
-            errores.append(ImportErrorFila(fila=f.fila, columna="cantidad", mensaje="Cantidad no numérica"))
+        except ValueError as exc:
+            errores.append(
+                ImportErrorFila(fila=f.fila, columna="cantidad", mensaje=f"Cantidad no numérica: {exc}")
+            )
 
         valor: Decimal | None = None
         try:
@@ -1128,9 +1131,11 @@ def importar_presupuesto(
                         fila=f.fila, columna="valor_unitario", mensaje="El valor unitario debe ser >= 0"
                     )
                 )
-        except ValueError:
+        except ValueError as exc:
             errores.append(
-                ImportErrorFila(fila=f.fila, columna="valor_unitario", mensaje="Valor unitario no numérico")
+                ImportErrorFila(
+                    fila=f.fila, columna="valor_unitario", mensaje=f"Valor unitario no numérico: {exc}"
+                )
             )
         if valor is None and nodo is not None and nodo.id not in apus:
             errores.append(

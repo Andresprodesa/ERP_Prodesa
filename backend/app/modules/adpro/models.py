@@ -34,7 +34,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -44,7 +43,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base, Coef, Money, Pct, Qty, TimestampMixin, str_enum
+from app.core.db import Base, Coef, Money, Pct, Qty, TimestampMixin, UTCDateTime, str_enum
 from app.modules.adpro.enums import (
     EstadoCompromiso,
     EstadoProyecto,
@@ -357,9 +356,9 @@ class PresupuestoVersion(TimestampMixin, Base):
     version_origen_id: Mapped[int | None] = mapped_column(
         ForeignKey("adpro_presupuesto_version.id", ondelete="SET NULL")
     )
-    aprobado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    aprobado_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     aprobado_por: Mapped[str | None] = mapped_column(String(150))
-    cerrado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cerrado_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cerrado_por: Mapped[str | None] = mapped_column(String(150))
 
     # Snapshot de totales al aprobar (null mientras sea BORRADOR)

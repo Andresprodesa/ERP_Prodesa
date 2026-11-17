@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 
 
 class AppError(Exception):
@@ -83,6 +83,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content=error_body("VALIDATION_ERROR", "Datos de entrada inválidos", _jsonable_errors(exc)),
+        )
+
+    @app.exception_handler(DataError)
+    async def _data_error(_req: Request, _exc: DataError) -> JSONResponse:
+        # Valor fuera del rango/precisión de la columna (p. ej. PostgreSQL 'numeric field
+        # overflow' o 'integer out of range'): es un error de la entrada, no del servidor.
+        return JSONResponse(
+            status_code=422,
+            content=error_body("VALIDATION_ERROR", "Valor fuera del rango permitido por la base de datos"),
         )
 
     @app.exception_handler(IntegrityError)

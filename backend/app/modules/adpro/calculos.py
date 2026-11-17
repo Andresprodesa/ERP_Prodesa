@@ -9,6 +9,10 @@ Política de redondeo (ROUND_HALF_UP en todo):
 - Totales por capítulo / costo directo: suma de valores totales de línea (ya en pesos).
 - AIU e IVA: cada componente se redondea a pesos sobre el costo directo / utilidad.
 - Porcentajes como FRACCIÓN (0.05 = 5 %); variaciones con 6 decimales.
+- Explosión de insumos: la cantidad se redondea (q4) SOLO para mostrar; el valor se calcula
+  con la cantidad exacta, para que la explosión cuadre con el costo directo (dif. de pesos).
+- Rango: todo valor monetario o cantidad cabe en Numeric(18,4) (|x| < 10^14); si un producto
+  lo excede se lanza ``BusinessRuleError`` (422) ANTES de llegar a la BD (motor-agnóstico).
 """
 
 from __future__ import annotations
@@ -18,12 +22,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.core.errors import BusinessRuleError
+
 ZERO = Decimal("0")
 ONE = Decimal("1")
 _PESO = Decimal("1")
 _Q4 = Decimal("0.0001")
 _Q6 = Decimal("0.000001")
 _PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+# Numeric(18,4): 14 dígitos enteros. Límite EXCLUSIVO para Money/Qty.
+MAX_NUMERIC_18_4 = Decimal("1e14")
 
 
 def to_decimal(value: Decimal | int | str | float | None) -> Decimal:
@@ -50,6 +58,16 @@ def q6(value: Decimal | int | str | float) -> Decimal:
     return to_decimal(value).quantize(_Q6, rounding=ROUND_HALF_UP)
 
 
+def asegurar_rango(valor: Decimal, etiqueta: str = "valor") -> Decimal:
+    """Verifica que ``valor`` quepa en Numeric(18,4); si no, ``BusinessRuleError`` (422)."""
+    if abs(to_decimal(valor)) >= MAX_NUMERIC_18_4:
+        raise BusinessRuleError(
+            f"El {etiqueta} excede el máximo permitido (menos de 10^14)",
+            details={"campo": etiqueta, "valor": str(valor)},
+        )
+    return valor
+
+
 # --- APU ---------------------------------------------------------------------------------
 def cantidad_con_desperdicio(cantidad: Decimal, desperdicio_pct: Decimal) -> Decimal:
     return to_decimal(cantidad) * (ONE + to_decimal(desperdicio_pct))
@@ -67,18 +85,30 @@ def valor_unitario_apu(componentes: Iterable[tuple[Decimal, Decimal, Decimal]]) 
 
 # --- Presupuesto -------------------------------------------------------------------------
 def valor_total_linea(cantidad: Decimal, valor_unitario: Decimal) -> Decimal:
-    return redondear_pesos(to_decimal(cantidad) * to_decimal(valor_unitario))
+    """redondear_pesos(cantidad · valor_unitario); 422 si el resultado no cabe en Numeric(18,4)."""
+    asegurar_rango(to_decimal(valor_unitario), "valor unitario")
+    return asegurar_rango(redondear_pesos(to_decimal(cantidad) * to_decimal(valor_unitario)), "valor total")
+
+
+def cantidad_exacta_insumo(
+    cantidad_linea: Decimal, cantidad_unitaria: Decimal, desperdicio_pct: Decimal
+) -> Decimal:
+    """Cantidad del insumo en una línea SIN redondear: cant_línea · cant_unitaria · (1+desperdicio).
+    Úsela para valorizar (``valor_total_insumo``); redondee con ``q4`` solo para mostrar."""
+    return to_decimal(cantidad_linea) * cantidad_con_desperdicio(cantidad_unitaria, desperdicio_pct)
 
 
 def cantidad_total_insumo(
     cantidad_linea: Decimal, cantidad_unitaria: Decimal, desperdicio_pct: Decimal
 ) -> Decimal:
-    """Cantidad del insumo en una línea (explosión): cant_línea · cant_unitaria · (1+desperdicio)."""
-    return q4(to_decimal(cantidad_linea) * cantidad_con_desperdicio(cantidad_unitaria, desperdicio_pct))
+    """Cantidad del insumo en una línea para MOSTRAR (q4)."""
+    return q4(cantidad_exacta_insumo(cantidad_linea, cantidad_unitaria, desperdicio_pct))
 
 
-def valor_total_insumo(cantidad_total: Decimal, precio_unitario: Decimal) -> Decimal:
-    return redondear_pesos(to_decimal(cantidad_total) * to_decimal(precio_unitario))
+def valor_total_insumo(cantidad: Decimal, precio_unitario: Decimal) -> Decimal:
+    """Valor del insumo en pesos. ``cantidad`` debe ser la EXACTA (``cantidad_exacta_insumo``):
+    valorizar una cantidad ya redondeada a 4 decimales descuadra miles de pesos con insumos caros."""
+    return redondear_pesos(to_decimal(cantidad) * to_decimal(precio_unitario))
 
 
 @dataclass(frozen=True)

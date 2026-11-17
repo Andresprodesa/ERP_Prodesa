@@ -1,7 +1,13 @@
 """Fixtures compartidas de pytest (PROPIEDAD: ARQUITECTO; los agentes no la editan).
 
-Cada test obtiene una BD SQLite EN MEMORIA nueva (StaticPool), creada con
-``Base.metadata.create_all``. Fixtures principales:
+Cada test obtiene una BD nueva creada con ``Base.metadata.create_all``:
+
+- por defecto SQLite EN MEMORIA (StaticPool);
+- con ``TEST_DATABASE_URL=postgresql+psycopg://...`` la suite corre contra PostgreSQL real
+  (se borran y recrean las tablas antes de cada test; use una BD DEDICADA a pruebas). Así se
+  detectan fallos exclusivos del motor (rangos INTEGER/NUMERIC, bloqueos, zonas horarias).
+
+Fixtures principales:
 
 - ``db``: ``Session`` directa para tests de ``service.py`` (usuario de auditoría "tester").
 - ``client``: ``TestClient`` SIN autenticar (misma BD que ``db``).
@@ -20,6 +26,7 @@ import os
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ.setdefault("JWT_SECRET", "test-secret-solo-para-pytest-0123456789")
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite://")
 
 from collections.abc import Callable, Iterator  # noqa: E402
 
@@ -40,7 +47,11 @@ TEST_PASSWORD = "clave-de-prueba-pytest"  # noqa: S105
 
 @pytest.fixture()
 def engine() -> Iterator[Engine]:
-    eng = build_engine("sqlite://", poolclass=StaticPool)
+    if TEST_DATABASE_URL.startswith("sqlite"):
+        eng = build_engine(TEST_DATABASE_URL, poolclass=StaticPool)
+    else:
+        eng = build_engine(TEST_DATABASE_URL)
+        db_models.metadata.drop_all(eng)
     db_models.metadata.create_all(eng)
     yield eng
     eng.dispose()

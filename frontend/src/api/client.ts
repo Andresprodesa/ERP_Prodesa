@@ -77,7 +77,8 @@ export interface AuditLogOut {
   username: string | null;
   accion: string;
   entidad: string;
-  entidad_id: number | null;
+  /** El backend lo guarda como texto (ids numéricos o claves compuestas). */
+  entidad_id: string | null;
   detalle: unknown;
 }
 
@@ -347,6 +348,8 @@ export interface RecalculoOut {
   version_id: number;
   lineas_recalculadas: number;
   insumos_sin_precio: number[];
+  /** Ítems de líneas APU que no se revalorizaron: su APU no existe o está inactivo. */
+  items_sin_apu: number[];
   total_costo_directo: Dec;
 }
 export interface LineaOut {
@@ -752,7 +755,7 @@ export const api = {
     me: () => get<UsuarioOut>("/auth/me"),
   },
 
-  auditoria: (q: { entidad?: string; entidad_id?: number; limit?: number; offset?: number } = {}) =>
+  auditoria: (q: { entidad?: string; entidad_id?: string; limit?: number; offset?: number } = {}) =>
     get<Page<AuditLogOut>>("/auditoria", q),
 
   maestros: {

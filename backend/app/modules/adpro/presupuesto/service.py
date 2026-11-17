@@ -39,11 +39,12 @@ from sqlalchemy.orm import Session, aliased, selectinload
 from app.core.audit import Accion, registrar_auditoria
 from app.core.db import SESSION_USER_KEY, utcnow
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.query import contiene
 from app.modules.adpro.calculos import (
     ZERO,
     ResultadoAIU,
     calcular_aiu,
-    cantidad_total_insumo,
+    cantidad_exacta_insumo,
     participacion_pct,
     q4,
     redondear_pesos,
@@ -96,7 +97,7 @@ class FilaSnapshot:
 @dataclass
 class InsumoExplotado:
     insumo_id: int
-    cantidad_total: Decimal = ZERO
+    cantidad_total: Decimal = ZERO  # q4 de la suma de cantidades EXACTAS
     valor_total: Decimal = ZERO
 
     @property
@@ -108,18 +109,21 @@ class InsumoExplotado:
 def explotar_insumos(filas: Iterable[FilaSnapshot]) -> dict[int, InsumoExplotado]:
     """Explosión de insumos: por cada fila (línea × insumo)
 
-    cantidad = cantidad_total_insumo(cant_línea, cant_unitaria, desperdicio)   (q4)
-    valor    = valor_total_insumo(cantidad, precio_snapshot)                    (pesos)
+    cantidad = cantidad_exacta_insumo(cant_línea, cant_unitaria, desperdicio)   (sin redondeo)
+    valor    = valor_total_insumo(cantidad, precio_snapshot)                     (pesos)
 
-    y se acumulan por insumo (la suma de valores ya redondeados por línea cuadra con lo que
-    vería un auditor línea a línea).
+    y se acumulan por insumo. La cantidad acumulada se redondea a 4 decimales UNA vez al final
+    (solo para mostrar): valorizar con la cantidad exacta hace que la explosión cuadre con el
+    costo directo con diferencias de pocos pesos por redondeo, aun con insumos de precio alto.
     """
     out: dict[int, InsumoExplotado] = {}
     for f in filas:
-        cant = cantidad_total_insumo(f.cantidad_linea, f.cantidad_unitaria, f.desperdicio_pct)
+        cant = cantidad_exacta_insumo(f.cantidad_linea, f.cantidad_unitaria, f.desperdicio_pct)
         acc = out.setdefault(f.insumo_id, InsumoExplotado(f.insumo_id))
         acc.cantidad_total += cant
         acc.valor_total += valor_total_insumo(cant, f.precio_unitario)
+    for acc in out.values():
+        acc.cantidad_total = q4(acc.cantidad_total)
     return out
 
 
@@ -158,17 +162,21 @@ def totales_version(valores_linea: Iterable[Decimal], version: PresupuestoVersio
 _CAMPOS_TRANSICION_CIERRE = {"estado", "cerrado_at", "cerrado_por", "updated_at", "updated_by"}
 
 
-def _estado_persistido(version: PresupuestoVersion) -> EstadoVersion | None:
-    """Estado con el que la versión está en la BD (antes de cambios pendientes)."""
-    st = inspect(version)
-    if st.transient or st.pending:
-        return None
-    hist = st.attrs.estado.history
-    if hist.deleted:
-        return EstadoVersion(hist.deleted[0])
-    if hist.unchanged:
-        return EstadoVersion(hist.unchanged[0])
-    return version.estado
+def _estados_en_bd(session: Session, version_ids: set[int]) -> dict[int, EstadoVersion]:
+    """Estado ACTUAL de las versiones leído de la BD (no de la sesión en memoria), con bloqueo de
+    fila (``SELECT ... FOR UPDATE``; SQLite lo ignora y ya serializa las escrituras).
+
+    Así una edición que empezó cuando la versión era BORRADOR no se escribe si otro usuario la
+    aprobó entretanto (TOCTOU): la aprobación también bloquea la fila antes de congelar totales.
+    """
+    if not version_ids:
+        return {}
+    stmt = (
+        select(PresupuestoVersion.id, PresupuestoVersion.estado)
+        .where(PresupuestoVersion.id.in_(sorted(version_ids)))
+        .with_for_update()
+    )
+    return {vid: EstadoVersion(estado) for vid, estado in session.execute(stmt)}
 
 
 def _version_de(session: Session, obj: Any) -> PresupuestoVersion | None:
@@ -194,19 +202,31 @@ def _cambios_columnas(obj: Any) -> set[str]:
 @event.listens_for(Session, "before_flush")
 def _guardia_inmutabilidad(session: Session, _ctx: Any, _instances: Any) -> None:
     with session.no_autoflush:
+        pares: list[tuple[Any, PresupuestoVersion]] = []
         for obj in list(session.new) + list(session.dirty) + list(session.deleted):
             if not isinstance(obj, PresupuestoVersion | PresupuestoLinea | PresupuestoLineaInsumo):
                 continue
             version = _version_de(session, obj)
-            if version is None:
-                continue
-            estado = _estado_persistido(version)
+            if version is None or version.id is None or inspect(version).pending:
+                continue  # versión nueva: aún no existe en la BD
+            pares.append((obj, version))
+        if not pares:
+            return
+        estados = _estados_en_bd(session, {v.id for _, v in pares})
+        for obj, version in pares:
+            estado = estados.get(version.id)
             if estado is None or estado.editable:
                 continue
             if obj is version and obj not in session.deleted:
                 cambios = _cambios_columnas(obj)
-                if not cambios or (estado is EstadoVersion.APROBADO and cambios <= _CAMPOS_TRANSICION_CIERRE):
-                    continue  # sin cambios reales o transición APROBADO -> CERRADO
+                if not cambios:
+                    continue
+                if (
+                    estado is EstadoVersion.APROBADO
+                    and version.estado is EstadoVersion.CERRADO
+                    and cambios <= _CAMPOS_TRANSICION_CIERRE
+                ):
+                    continue  # única transición permitida: APROBADO -> CERRADO
             elif obj in session.dirty and not _cambios_columnas(obj):
                 continue  # solo cambió una colección/relación sin columnas
             raise BusinessRuleError(
@@ -220,6 +240,22 @@ def _guardia_inmutabilidad(session: Session, _ctx: Any, _instances: Any) -> None
 # =====================================================================================
 def obtener_version(db: Session, version_id: int) -> PresupuestoVersion:
     version = db.get(PresupuestoVersion, version_id)
+    if version is None:
+        raise NotFoundError(f"Versión de presupuesto {version_id} no existe")
+    return version
+
+
+def obtener_version_para_escritura(db: Session, version_id: int) -> PresupuestoVersion:
+    """Carga la versión desde la BD con bloqueo de fila (``FOR UPDATE`` en PostgreSQL) y
+    refresca la instancia de la sesión. Toda operación que escribe en una versión (líneas,
+    snapshot, parámetros, aprobar, cerrar) valida el estado sobre ESTA lectura, de modo que dos
+    transacciones concurrentes (editar línea vs. aprobar) quedan serializadas."""
+    version = db.scalar(
+        select(PresupuestoVersion)
+        .where(PresupuestoVersion.id == version_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if version is None:
         raise NotFoundError(f"Versión de presupuesto {version_id} no existe")
     return version
@@ -351,10 +387,13 @@ def calcular_explosion(db: Session, version_id: int, tipo: TipoInsumo | None = N
 
 
 def _apus_por_item(db: Session, item_ids: Iterable[int]) -> dict[int, Apu]:
+    """APU ACTIVO de cada ítem. Un APU inactivo no valoriza (crear, importar, recalcular, copiar)."""
     ids = sorted(set(item_ids))
     if not ids:
         return {}
-    apus = db.scalars(select(Apu).where(Apu.item_id.in_(ids)).options(selectinload(Apu.insumos)))
+    apus = db.scalars(
+        select(Apu).where(Apu.item_id.in_(ids), Apu.activo.is_(True)).options(selectinload(Apu.insumos))
+    )
     return {a.item_id: a for a in apus}
 
 
@@ -429,7 +468,7 @@ def _aplicar(
             msg = f"El ítem {item.codigo} está repetido en la solicitud"
         elif modo == "crear" and ln.item_id in existentes:
             msg = f"El ítem {item.codigo} ya existe en la versión"
-        elif ln.valor_unitario is None and (ln.item_id not in apus or not apus[ln.item_id].activo):
+        elif ln.valor_unitario is None and ln.item_id not in apus:
             msg = f"El ítem {item.codigo} no tiene APU activo; indique valor_unitario"
         if msg:
             errores.append({"indice": idx, "mensaje": msg})
@@ -487,7 +526,7 @@ def aplicar_lineas(
     ``reemplazar``: borra todas las líneas y carga. Todo o nada."""
     if modo not in ("agregar", "reemplazar"):
         raise BusinessRuleError(f"Modo inválido: {modo}")
-    version = obtener_version(db, version_id)
+    version = obtener_version_para_escritura(db, version_id)
     # La validación ocurre antes de mutar nada: si lanza, la sesión queda intacta.
     res = _aplicar(db, version, lineas, modo=modo, origen_manual=origen_manual)
     if commit:
@@ -534,8 +573,7 @@ def listar_presupuestos(
     if proyecto_id is not None:
         stmt = stmt.where(Presupuesto.proyecto_id == proyecto_id)
     if q:
-        patron = f"%{q.strip()}%"
-        stmt = stmt.where(Presupuesto.codigo.ilike(patron) | Presupuesto.nombre.ilike(patron))
+        stmt = stmt.where(contiene(Presupuesto.codigo, q) | contiene(Presupuesto.nombre, q))
     return list(db.scalars(stmt.order_by(Presupuesto.proyecto_id, Presupuesto.codigo)))
 
 
@@ -715,7 +753,7 @@ def crear_version(db: Session, presupuesto_id: int, data: s.VersionCreate) -> Pr
 
 
 def actualizar_version(db: Session, version_id: int, data: s.VersionUpdate) -> PresupuestoVersion:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     cambios = data.model_dump(exclude_unset=True)
     if cambios.get("ciudad_precios_id") is not None:
@@ -729,7 +767,7 @@ def actualizar_version(db: Session, version_id: int, data: s.VersionUpdate) -> P
 
 
 def eliminar_version(db: Session, version_id: int) -> None:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     registrar_auditoria(
         db,
@@ -743,8 +781,9 @@ def eliminar_version(db: Session, version_id: int) -> None:
 
 
 def aprobar_version(db: Session, version_id: int, observacion: str | None = None) -> PresupuestoVersion:
-    """BORRADOR -> APROBADO. Congela totales; desde aquí líneas y snapshot son inmutables."""
-    v = obtener_version(db, version_id)
+    """BORRADOR -> APROBADO. Congela totales; desde aquí líneas y snapshot son inmutables.
+    Bloquea la versión antes de leer las líneas: los totales congelados cuadran con ellas."""
+    v = obtener_version_para_escritura(db, version_id)
     if v.estado is not EstadoVersion.BORRADOR:
         raise BusinessRuleError(f"Solo se aprueban versiones BORRADOR (estado actual: {v.estado.value})")
     lineas = _lineas_con_snapshot(db, v.id)
@@ -774,7 +813,7 @@ def aprobar_version(db: Session, version_id: int, observacion: str | None = None
 
 
 def cerrar_version(db: Session, version_id: int, observacion: str | None = None) -> PresupuestoVersion:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     if v.estado is not EstadoVersion.APROBADO:
         raise BusinessRuleError(f"Solo se cierran versiones APROBADAS (estado actual: {v.estado.value})")
     v.estado = EstadoVersion.CERRADO
@@ -813,6 +852,7 @@ def copiar_version(db: Session, version_id: int, data: s.VersionCopy) -> Presupu
     lineas_origen = _lineas_con_snapshot(db, origen.id)
     apus = _apus_por_item(db, (ln.item_id for ln in lineas_origen)) if data.recalcular_precios else {}
     revalorizadas = 0
+    sin_apu: list[int] = []
     for lo in lineas_origen:
         ln = PresupuestoLinea(
             version_id=nueva.id,
@@ -837,7 +877,10 @@ def copiar_version(db: Session, version_id: int, data: s.VersionCopy) -> Presupu
         ]
         db.add(ln)
         apu = apus.get(lo.item_id)
-        if data.recalcular_precios and lo.origen_unitario is OrigenValor.APU and apu is not None:
+        if data.recalcular_precios and lo.origen_unitario is OrigenValor.APU:
+            if apu is None:  # sin APU activo: conserva el valor y snapshot de la versión origen
+                sin_apu.append(lo.item_id)
+                continue
             db.flush()
             _valorizar_linea_apu(db, nueva, ln, apu)
             revalorizadas += 1
@@ -853,6 +896,7 @@ def copiar_version(db: Session, version_id: int, data: s.VersionCopy) -> Presupu
             "lineas": len(lineas_origen),
             "recalcular_precios": data.recalcular_precios,
             "lineas_revalorizadas": revalorizadas,
+            "items_sin_apu": sin_apu,
             "fecha_precios": nueva.fecha_precios,
         },
     )
@@ -862,7 +906,7 @@ def copiar_version(db: Session, version_id: int, data: s.VersionCopy) -> Presupu
 
 def recalcular_version(db: Session, version_id: int) -> s.RecalculoOut:
     """Revaloriza las líneas de origen APU con el APU y precios vigentes (solo BORRADOR)."""
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     lineas = _lineas_con_snapshot(db, v.id)
     apus = _apus_por_item(db, (ln.item_id for ln in lineas))
@@ -881,6 +925,7 @@ def recalcular_version(db: Session, version_id: int) -> s.RecalculoOut:
         n += 1
     db.flush()
     total_cd = redondear_pesos(sum((ln.valor_total for ln in lineas), ZERO))
+    sin_apu = sorted(set(sin_apu))
     registrar_auditoria(
         db,
         accion=Accion.RECALCULAR,
@@ -899,6 +944,7 @@ def recalcular_version(db: Session, version_id: int) -> s.RecalculoOut:
         version_id=v.id,
         lineas_recalculadas=n,
         insumos_sin_precio=sorted(sin_precio),
+        items_sin_apu=sin_apu,
         total_costo_directo=total_cd,
     )
 
@@ -966,7 +1012,7 @@ def _obtener_linea(db: Session, version_id: int, linea_id: int) -> PresupuestoLi
 
 
 def crear_linea(db: Session, version_id: int, data: s.LineaCreate) -> PresupuestoLinea:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     item = db.get(EdtNodo, data.item_id)
     if item is None:
@@ -994,7 +1040,7 @@ def crear_linea(db: Session, version_id: int, data: s.LineaCreate) -> Presupuest
 
 
 def crear_lineas_lote(db: Session, version_id: int, lineas: list[s.LineaCreate]) -> s.LoteResultado:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     try:
         res = _aplicar(db, v, lineas, modo="crear", origen_manual=OrigenValor.MANUAL)
@@ -1007,7 +1053,7 @@ def crear_lineas_lote(db: Session, version_id: int, lineas: list[s.LineaCreate])
 
 
 def actualizar_linea(db: Session, version_id: int, linea_id: int, data: s.LineaUpdate) -> PresupuestoLinea:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     ln = _obtener_linea(db, version_id, linea_id)
     cambios = data.model_dump(exclude_unset=True)
@@ -1026,7 +1072,7 @@ def actualizar_linea(db: Session, version_id: int, linea_id: int, data: s.LineaU
 
 
 def eliminar_linea(db: Session, version_id: int, linea_id: int) -> None:
-    v = obtener_version(db, version_id)
+    v = obtener_version_para_escritura(db, version_id)
     asegurar_editable(v)
     db.delete(_obtener_linea(db, version_id, linea_id))
     _commit(db)
@@ -1037,7 +1083,7 @@ def listar_insumos_linea(db: Session, version_id: int, linea_id: int) -> list[s.
     out: list[s.LineaInsumoOut] = []
     for li in sorted(ln.insumos, key=lambda x: x.insumo.codigo):
         ins = li.insumo
-        cant = cantidad_total_insumo(ln.cantidad, li.cantidad_unitaria, li.desperdicio_pct)
+        cant = cantidad_exacta_insumo(ln.cantidad, li.cantidad_unitaria, li.desperdicio_pct)
         out.append(
             s.LineaInsumoOut(
                 insumo_id=li.insumo_id,
@@ -1050,7 +1096,7 @@ def listar_insumos_linea(db: Session, version_id: int, linea_id: int) -> list[s.
                 precio_unitario=li.precio_unitario,
                 valor_unitario=li.valor_unitario,
                 precio_faltante=li.precio_faltante,
-                cantidad_total=cant,
+                cantidad_total=q4(cant),
                 valor_total=valor_total_insumo(cant, li.precio_unitario),
             )
         )

@@ -6,10 +6,10 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.db import Base, TimestampMixin, str_enum, utcnow
+from app.core.db import Base, TimestampMixin, UTCDateTime, str_enum, utcnow
 
 
 class Rol(str, enum.Enum):
@@ -46,7 +46,7 @@ class AuditLog(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey("core_usuario.id", ondelete="SET NULL"))
     username: Mapped[str] = mapped_column(String(150), nullable=False)
     accion: Mapped[str] = mapped_column(String(50), nullable=False)  # p. ej. CREAR, APROBAR, IMPORTAR

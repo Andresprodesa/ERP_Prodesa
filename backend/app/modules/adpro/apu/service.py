@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.audit import Accion, registrar_auditoria
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.query import contiene
 from app.modules.adpro.calculos import ZERO, q4
 from app.modules.adpro.enums import NivelEdt, TipoInsumo
 from app.modules.adpro.models import Apu, ApuInsumo, Ciudad, EdtNodo, Insumo
@@ -138,9 +140,8 @@ def listar_apus(
     item = aliased(EdtNodo)
     stmt = select(Apu).join(item, item.id == Apu.item_id)
     if q:
-        patron = f"%{q.strip()}%"
         stmt = stmt.where(
-            or_(item.codigo.ilike(patron), item.descripcion.ilike(patron), Apu.descripcion.ilike(patron))
+            or_(contiene(item.codigo, q), contiene(item.descripcion, q), contiene(Apu.descripcion, q))
         )
     if activo is not None:
         stmt = stmt.where(Apu.activo.is_(activo))
@@ -245,10 +246,17 @@ def crear_apu(db: Session, data: s.ApuCreate) -> Apu:
 
 def actualizar_apu(db: Session, apu_id: int, data: s.ApuUpdate) -> Apu:
     apu = obtener_apu(db, apu_id)
+    diff: dict[str, Any] = {}
     for campo, valor in data.model_dump(exclude_unset=True).items():
         if campo == "activo" and valor is None:
             continue
+        if getattr(apu, campo) != valor:
+            diff[campo] = {"antes": getattr(apu, campo), "despues": valor}
         setattr(apu, campo, valor)
+    if diff:
+        registrar_auditoria(
+            db, accion=Accion.ACTUALIZAR, entidad=ENTIDAD, entidad_id=apu.id, detalle={"cambios": diff}
+        )
     _commit(db)
     return obtener_apu(db, apu_id)
 
@@ -284,6 +292,18 @@ def agregar_insumo(db: Session, apu_id: int, data: s.ApuInsumoIn) -> ApuInsumo:
     orden_def = max((c.orden for c in apu.insumos), default=0) + 1
     comp = _nuevo_componente(data, orden_def)
     apu.insumos.append(comp)
+    registrar_auditoria(
+        db,
+        accion=Accion.ACTUALIZAR,
+        entidad=ENTIDAD,
+        entidad_id=apu.id,
+        detalle={
+            "operacion": "agregar_insumo",
+            "insumo_id": data.insumo_id,
+            "cantidad": data.cantidad,
+            "desperdicio_pct": data.desperdicio_pct,
+        },
+    )
     _commit(db)
     db.refresh(comp)
     return comp
@@ -298,10 +318,21 @@ def _obtener_componente(db: Session, apu_id: int, apu_insumo_id: int) -> ApuInsu
 
 def actualizar_insumo(db: Session, apu_id: int, apu_insumo_id: int, data: s.ApuInsumoUpdate) -> ApuInsumo:
     comp = _obtener_componente(db, apu_id, apu_insumo_id)
+    diff: dict[str, Any] = {}
     for campo, valor in data.model_dump(exclude_unset=True).items():
         if valor is None and campo in {"cantidad", "desperdicio_pct", "orden"}:
             continue  # campos NOT NULL: None = no cambiar
+        if getattr(comp, campo) != valor:
+            diff[campo] = {"antes": getattr(comp, campo), "despues": valor}
         setattr(comp, campo, valor)
+    if diff:
+        registrar_auditoria(
+            db,
+            accion=Accion.ACTUALIZAR,
+            entidad=ENTIDAD,
+            entidad_id=apu_id,
+            detalle={"operacion": "actualizar_insumo", "insumo_id": comp.insumo_id, "cambios": diff},
+        )
     _commit(db)
     db.refresh(comp)
     return comp
@@ -309,6 +340,18 @@ def actualizar_insumo(db: Session, apu_id: int, apu_insumo_id: int, data: s.ApuI
 
 def eliminar_insumo(db: Session, apu_id: int, apu_insumo_id: int) -> None:
     comp = _obtener_componente(db, apu_id, apu_insumo_id)
+    registrar_auditoria(
+        db,
+        accion=Accion.ACTUALIZAR,
+        entidad=ENTIDAD,
+        entidad_id=apu_id,
+        detalle={
+            "operacion": "eliminar_insumo",
+            "insumo_id": comp.insumo_id,
+            "cantidad": comp.cantidad,
+            "desperdicio_pct": comp.desperdicio_pct,
+        },
+    )
     db.delete(comp)
     _commit(db)
 

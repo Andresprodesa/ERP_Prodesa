@@ -20,7 +20,17 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-_MILES_RE = re.compile(r"^-?\d{1,3}(\.\d{3})+$")
+# Formatos numéricos aceptados en texto (misma regla que ``decIn`` del frontend):
+# - colombiano con punto de miles y coma decimal opcional: "1.250", "1.250.000", "1.250,5"
+# - coma decimal sin miles: "1250,5"
+# - punto decimal sin miles: "1250.5", "0.25"
+# Cualquier otro (p. ej. formato US "1,250.50" o "1,250") se RECHAZA: adivinar el separador
+# puede leer una cantidad mil veces mayor o menor sin que nadie lo note.
+_CO_MILES_RE = re.compile(r"^-?\d{1,3}(\.\d{3})+(,\d+)?$")
+_COMA_DECIMAL_RE = re.compile(r"^-?\d+,\d+$")
+_PUNTO_DECIMAL_RE = re.compile(r"^-?(\d+(\.\d+)?|\.\d+)$")
+# Prefijos que Excel/LibreOffice interpretan como fórmula (CSV/Excel injection).
+_PREFIJOS_FORMULA = ("=", "+", "-", "@", chr(9), chr(13))  # chr(9)=TAB, chr(13)=CR
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -76,6 +86,23 @@ def _valor_celda(v: Any) -> Any:
     return v
 
 
+def es_texto_peligroso(v: Any) -> bool:
+    """True si ``v`` es un texto que una hoja de cálculo podría ejecutar como fórmula."""
+    return isinstance(v, str) and v.startswith(_PREFIJOS_FORMULA)
+
+
+def asignar_celda(ws: Worksheet, row: int, column: int, value: Any) -> Any:
+    """Escribe un valor en la celda SIN permitir fórmulas: los textos (de usuario) que empiezan
+    por ``= + - @ \t \r`` se guardan como texto literal (``data_type='s'``), no como fórmula.
+    Todas las exportaciones deben escribir por aquí (o por ``escribir_tabla``/``escribir_pares``)."""
+    v = _valor_celda(value)
+    c = ws.cell(row=row, column=column)
+    c.value = v
+    if es_texto_peligroso(v):
+        c.data_type = "s"
+    return c
+
+
 def escribir_tabla(
     ws: Worksheet,
     columnas: Sequence[Columna],
@@ -88,7 +115,7 @@ def escribir_tabla(
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor=COLOR_ENCABEZADO)
     for j, col in enumerate(columnas, start=1):
-        c = ws.cell(row=fila_inicio, column=j, value=col.titulo)
+        c = asignar_celda(ws, fila_inicio, j, col.titulo)
         c.font = header_font
         c.fill = header_fill
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -111,7 +138,7 @@ def escribir_tabla(
 
 def _escribir_fila(ws: Worksheet, r: int, columnas: Sequence[Columna], fila: Sequence[Any]) -> None:
     for j, (col, v) in enumerate(zip(columnas, fila, strict=False), start=1):
-        c = ws.cell(row=r, column=j, value=_valor_celda(v))
+        c = asignar_celda(ws, r, j, v)
         c.border = _BORDE
         fmt = _NUMBER_FORMATS.get(col.formato)
         if fmt and v is not None:
@@ -125,8 +152,8 @@ def escribir_pares(ws: Worksheet, pares: Sequence[tuple[str, Any, Formato]], *, 
     r = fila_inicio - 1
     for etiqueta, valor, formato in pares:
         r += 1
-        ws.cell(row=r, column=1, value=etiqueta).font = Font(bold=True)
-        c = ws.cell(row=r, column=2, value=_valor_celda(valor))
+        asignar_celda(ws, r, 1, etiqueta).font = Font(bold=True)
+        c = asignar_celda(ws, r, 2, valor)
         fmt = _NUMBER_FORMATS.get(formato)
         if fmt and valor is not None:
             c.number_format = fmt
@@ -210,26 +237,32 @@ def leer_plantilla(contenido: bytes) -> LecturaPlantilla:
 def parse_decimal(v: Any) -> Decimal | None:
     """Convierte un valor de celda a Decimal. ``None`` si vacío; ``ValueError`` si no es número.
 
-    Acepta números de Excel y textos como ``"1250.5"``, ``"1.250,5"`` o ``"1250,5"``.
+    Acepta números de Excel y textos ``"1250.5"``, ``"1.250,5"``, ``"1250,5"``, ``"1.000"``
+    (= mil), ``"1,25"`` (coma decimal). Rechaza formatos de otra configuración regional o
+    ambiguos (``"1,250.50"``, ``"1,250,000"``, ``"1.2.3"``) con un mensaje del formato esperado.
     """
     if v is None:
         return None
     if isinstance(v, bool):
         raise ValueError("valor no numérico")
     if isinstance(v, int | Decimal):
-        return Decimal(v)
-    if isinstance(v, float):
-        return Decimal(str(v))
-    s = str(v).strip().replace(" ", "").replace("$", "")
-    if not s:
-        return None
-    if "," in s or _MILES_RE.match(s):
-        # Formato colombiano: punto de miles, coma decimal ("1.250,5", "1.000").
-        s = s.replace(".", "").replace(",", ".")
-    try:
-        d = Decimal(s)
-    except InvalidOperation as exc:
-        raise ValueError("valor no numérico") from exc
+        d = Decimal(v)
+    elif isinstance(v, float):
+        d = Decimal(str(v))
+    else:
+        s = str(v).strip().replace(" ", "").replace(chr(0xA0), "").replace("$", "")
+        if not s:
+            return None
+        if _CO_MILES_RE.match(s):
+            s = s.replace(".", "").replace(",", ".")
+        elif _COMA_DECIMAL_RE.match(s):
+            s = s.replace(",", ".")
+        elif not _PUNTO_DECIMAL_RE.match(s):
+            raise ValueError(f"formato numérico no reconocido '{v}' (use 1250.5 o 1.250,5)")
+        try:
+            d = Decimal(s)
+        except InvalidOperation as exc:  # pragma: no cover - las regex ya lo garantizan
+            raise ValueError("valor no numérico") from exc
     if not d.is_finite():
         raise ValueError("valor no numérico")
     return d

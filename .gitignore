@@ -25,6 +25,8 @@ dist/
 .env
 .env.*
 !.env.example
+# Secreto JWT aleatorio de desarrollo local (lo genera app/core/config.py)
+.jwt_secret.local
 
 # Exportaciones locales
 backend/exports/

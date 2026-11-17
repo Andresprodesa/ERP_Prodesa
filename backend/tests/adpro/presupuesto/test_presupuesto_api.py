@@ -117,7 +117,7 @@ def test_lineas_valorizadas_desde_apu_y_manual(auth_client, esc, crear_v1) -> No
     ins = auth_client.get(f"{BASE}/versiones/{ids['vid']}/lineas/{conc['id']}/insumos").json()
     por_cod = {i["insumo_codigo"]: i for i in ins}
     assert D(por_cod["MAT-002"]["cantidad_total"]) == D("7.4718")  # 12.35·0.55·1.10 = 7.47175
-    assert D(por_cod["MAT-002"]["valor_total"]) == D("373590")
+    assert D(por_cod["MAT-002"]["valor_total"]) == D("373588")  # 7.47175·50000 (cantidad exacta)
     assert D(por_cod["MAT-001"]["cantidad_unitaria"]) == D("350") and D(
         por_cod["MAT-001"]["desperdicio_pct"]
     ) == D("0.03")
@@ -215,32 +215,32 @@ def test_explosion_por_insumo_y_tipo(auth_client, crear_v1) -> None:  # type: ig
     )
     assert (D(filas["MAT-002"]["cantidad_total"]), D(filas["MAT-002"]["valor_total"])) == (
         D("7.4718"),
-        D("373590"),
+        D("373588"),  # se valoriza con la cantidad exacta 7.47175 (no con la mostrada q4)
     )
     assert (D(filas["EQ-001"]["cantidad_total"]), D(filas["EQ-001"]["valor_total"])) == (
         D("4.1167"),
-        D("32934"),
+        D("32933"),  # 4.11666255·8000 = 32933.30
     )
     assert (D(filas["MO-001"]["cantidad_total"]), D(filas["MO-001"]["valor_total"])) == (
         D("50.25"),
         D("1005000"),
     )
-    assert D(e["total_insumos"]) == D("6074749")  # vs 6074746 del capítulo: redondeo por insumo
+    assert D(e["total_insumos"]) == D("6074746")  # = capítulo 01 (cantidades exactas)
     assert D(e["valor_sin_desglose"]) == D("280502")  # línea MANUAL de la losa
-    assert D(e["total"]) == D("6355251")
+    assert D(e["total"]) == D("6355248")  # = costo directo
     tipos = {t["tipo"]: t for t in e["por_tipo"]}
     assert [t["tipo"] for t in e["por_tipo"]] == ["MAT", "MO", "EQ"]
-    assert D(tipos["MAT"]["valor_total"]) == D("5036815") and D(tipos["MAT"]["participacion_pct"]) == D(
+    assert D(tipos["MAT"]["valor_total"]) == D("5036813") and D(tipos["MAT"]["participacion_pct"]) == D(
         "0.829140"
     )
     assert D(tipos["MO"]["participacion_pct"]) == D("0.165439")
 
     solo_mat = auth_client.get(f"{BASE}/versiones/{ids['vid']}/explosion", params={"tipo": "MAT"}).json()
     assert [f["insumo_codigo"] for f in solo_mat["filas"]] == ["MAT-001", "MAT-002"]
-    assert D(solo_mat["total_insumos"]) == D("5036815")
+    assert D(solo_mat["total_insumos"]) == D("5036813")
     assert D(solo_mat["filas"][0]["participacion_pct"]) == D(
         "0.925828"
-    )  # 4663225 / 5036815 = 0.9258281 -> 0.925828
+    )  # 4663225 / 5036813 = 0.92582 -> 0.925828
 
 
 def test_roles_presupuesto(client_as, crear_v1) -> None:  # type: ignore[no-untyped-def]

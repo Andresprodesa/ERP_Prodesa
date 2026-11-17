@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.core.schemas import ORMModel
+from app.core.schemas import Int32, ORMModel
 from app.modules.adpro.enums import TipoInsumo
 
 
@@ -20,14 +20,14 @@ class ApuInsumoIn(BaseModel):
     # Cantidad por unidad de ítem: Numeric(18,6) => hasta 6 decimales.
     cantidad: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
     desperdicio_pct: Decimal = Field(default=Decimal("0"), ge=0, max_digits=9, decimal_places=6)
-    orden: int | None = None
+    orden: Int32 | None = None
     observacion: str | None = Field(default=None, max_length=300)
 
 
 class ApuInsumoUpdate(BaseModel):
     cantidad: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=6)
     desperdicio_pct: Decimal | None = Field(default=None, ge=0, max_digits=9, decimal_places=6)
-    orden: int | None = None
+    orden: Int32 | None = None
     observacion: str | None = Field(default=None, max_length=300)
 
 

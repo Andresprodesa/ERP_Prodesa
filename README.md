@@ -19,9 +19,9 @@ python -m venv .venv
 ```
 
 - API y documentación interactiva: http://127.0.0.1:8000/docs
-- Usuarios de prueba: `admin`, `presupuesto`, `obra`, `consulta`; contraseñas de prueba en `DEV_*` de tu `.env` (o el valor por defecto de `app/seed.py` si no hay `.env`). Solo desarrollo local.
-- Tests: `./.venv/Scripts/python.exe -m pytest`
-- PostgreSQL opcional: `docker compose up -d db` (ver `.env.example`).
+- Usuarios de prueba: `admin`, `presupuesto`, `obra`, `consulta`; contraseñas en `DEV_*` de tu `.env`. Si no están definidas, `app.seed` genera una aleatoria al crear los usuarios y la imprime una sola vez en consola. Solo desarrollo local.
+- Tests: `./.venv/Scripts/python.exe -m pytest` (SQLite en memoria). Contra PostgreSQL: `TEST_DATABASE_URL=postgresql+psycopg://usuario:clave@localhost:5432/bd_de_pruebas ./.venv/Scripts/python.exe -m pytest` (usa una BD dedicada: borra y recrea tablas).
+- PostgreSQL opcional: `docker compose up -d db` (ver `.env.example`; exige `POSTGRES_PASSWORD`, y el perfil `app` además `JWT_SECRET`).
 
 ## Documentación
 - [Arquitectura y estrategia a producción](docs/ARQUITECTURA.md)

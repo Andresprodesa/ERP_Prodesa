@@ -5,7 +5,8 @@ Uso (desde backend/, después de ``alembic upgrade head``):
     .venv/Scripts/python.exe -m app.seed
 
 Las contraseñas salen de ``DEV_ADMIN_PASSWORD`` / ``DEV_USERS_PASSWORD`` (.env). Si no están
-definidas se usa un valor de prueba local. NUNCA ejecutar en producción (se bloquea).
+definidas se GENERA una aleatoria al crear los usuarios y se imprime UNA vez en consola (no hay
+contraseña fija en el código). NUNCA ejecutar en producción (se bloquea).
 Idempotente: no duplica registros existentes.
 
 Los datos de demostración del dominio (insumos, APU, presupuestos de ejemplo) se agregan en
@@ -15,6 +16,7 @@ Los datos de demostración del dominio (insumos, APU, presupuestos de ejemplo) s
 from __future__ import annotations
 
 import importlib
+import secrets
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,9 +27,6 @@ from app.core.db import SESSION_USER_KEY, SessionLocal
 from app.core.models import Rol, Usuario
 from app.core.security import hash_password
 from app.modules.adpro.models import Ciudad, Unidad
-
-# Valor de PRUEBA solo para entornos locales sin .env (no es una credencial real).
-_PASSWORD_PRUEBA_LOCAL = "Prodesa-Dev-2026"  # noqa: S105
 
 USUARIOS_DEMO = [
     # username, nombre (ficticio), rol
@@ -69,13 +68,30 @@ def _upsert_usuario(db: Session, username: str, nombre: str, rol: Rol, password:
     return True
 
 
+def _password_generada() -> str:
+    return secrets.token_urlsafe(12)
+
+
 def seed_usuarios(db: Session) -> int:
-    admin_pwd = settings.DEV_ADMIN_PASSWORD or _PASSWORD_PRUEBA_LOCAL
+    admin_pwd = settings.DEV_ADMIN_PASSWORD or _password_generada()
     users_pwd = settings.DEV_USERS_PASSWORD or admin_pwd
-    n = int(_upsert_usuario(db, settings.DEV_ADMIN_USERNAME, "Administrador (demo)", Rol.ADMIN, admin_pwd))
+    n = 0
+    if _upsert_usuario(db, settings.DEV_ADMIN_USERNAME, "Administrador (demo)", Rol.ADMIN, admin_pwd):
+        n += 1
+        if not settings.DEV_ADMIN_PASSWORD:
+            _avisar_password(settings.DEV_ADMIN_USERNAME, admin_pwd)
     for username, nombre, rol in USUARIOS_DEMO:
-        n += int(_upsert_usuario(db, username, nombre, rol, users_pwd))
+        if _upsert_usuario(db, username, nombre, rol, users_pwd):
+            n += 1
+            if not settings.DEV_USERS_PASSWORD:
+                _avisar_password(username, users_pwd)
     return n
+
+
+def _avisar_password(username: str, password: str) -> None:
+    """Muestra la contraseña GENERADA (solo al crear el usuario; defina DEV_*_PASSWORD en .env
+    para fijarla). Es una clave local de prueba, no una credencial real."""
+    print(f"[seed] Usuario '{username}' creado con contraseña generada: {password}")  # noqa: T201
 
 
 def seed_catalogos(db: Session) -> int:

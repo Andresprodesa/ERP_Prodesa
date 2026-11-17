@@ -13,7 +13,7 @@ lo reporta (no lo edita). Swagger vivo: `http://127.0.0.1:8000/docs`.
 | Formato | JSON UTF-8. Nombres de campos en `snake_case` español |
 | Decimales | Dinero, cantidades y porcentajes viajan como **string** (`"1250000.0000"`). En requests se aceptan string o número |
 | Porcentajes | **Fracción**: `"0.05"` = 5 %. El frontend muestra ×100 |
-| Fechas | `YYYY-MM-DD`; timestamps ISO-8601 con zona; periodos mensuales `YYYY-MM` |
+| Fechas | `YYYY-MM-DD`; timestamps ISO-8601 **siempre en UTC con zona** (`+00:00`), igual en SQLite y PostgreSQL; periodos mensuales `YYYY-MM` |
 | Enums | Strings en MAYÚSCULA (ver §0.2) |
 | Listados paginados | `Page[T]` = `{"items": [T], "total": int, "limit": int, "offset": int}`; query `limit` (1–500, def. 50) y `offset` (def. 0) |
 | Listados de catálogos pequeños | Lista JSON simple `[T]` (se indica en cada endpoint) |
@@ -36,7 +36,7 @@ Siempre con este cuerpo:
 | 403 | `FORBIDDEN` | Rol insuficiente (`details.requerido`, `details.actual`) |
 | 404 | `NOT_FOUND` | Recurso no existe |
 | 409 | `CONFLICT`, `INTEGRITY_ERROR` | Código duplicado, referencia en uso |
-| 422 | `VALIDATION_ERROR` | Esquema inválido (`details` = lista `{loc, msg, type}`) |
+| 422 | `VALIDATION_ERROR` | Esquema inválido (`details` = lista `{loc, msg, type}`); también un valor fuera del rango de la columna en BD (`details = null`), nunca 500 |
 | 422 | `BUSINESS_RULE` | Regla de negocio (p. ej. versión no editable) |
 
 Precisiones (acordadas en la integración v0.2):
@@ -44,6 +44,11 @@ Precisiones (acordadas en la integración v0.2):
   cuerpo** (`unidad_id`, `ciudad_id`, `parent_id`, `copiar_de_lista_id`, `item_id`...) responde
   `422 BUSINESS_RULE`.
 - Los requests rechazan campos desconocidos (`extra=forbid`) con `422 VALIDATION_ERROR`.
+- Rangos (v0.2.1): los enteros de entrada que van a columnas INTEGER (`orden`...) aceptan como
+  máximo `2147483647` (422 `VALIDATION_ERROR`); un id de ruta mayor responde 404/422. Un valor
+  monetario o total calculado (`cantidad·valor_unitario`, total de compromiso) que no quepa en
+  `Numeric(18,4)` (|x| ≥ 10^14) responde `422 BUSINESS_RULE` antes de llegar a la BD.
+- Búsqueda `q`: "contiene", sin distinguir mayúsculas; `%` y `_` se buscan literalmente.
 - Campos de texto/código anulables: `unidad_codigo`, `capitulo_id`, `capitulo_codigo` y
   `capitulo_descripcion` pueden venir en `null` (el frontend lo modela como `T | null`).
 
@@ -128,7 +133,7 @@ valida el token de Entra: **el resto del contrato no cambia**.
 
 - `InsumoOut` = `{id, codigo, descripcion, unidad_id, unidad_codigo, tipo, activo, observaciones}`
 - `InsumoCreate` = `{codigo, descripcion, unidad_id, tipo, activo?=true, observaciones?}`
-- `InsumoUpdate` = todos opcionales excepto que `codigo` NO se puede cambiar si el insumo está en un APU o presupuesto (422).
+- `InsumoUpdate` = todos opcionales. `codigo` y `unidad_id` NO se pueden cambiar si el insumo está en un APU, presupuesto o compromiso (422); `tipo` NO se puede cambiar si el insumo está en una versión APROBADA o CERRADA (422: su explosión por tipo es inmutable). Los cambios quedan en auditoría (`ACTUALIZAR`, `detalle.cambios` antes/después).
 - `PrecioHistoricoOut` = `{lista_id, lista_codigo, lista_nombre, ciudad_id, ciudad_codigo, fecha_desde, precio}`
 
 ### 2.3 Listas de precios (con vigencia por ciudad, histórico)
@@ -257,9 +262,10 @@ valida el token de Entra: **el resto del contrato no cambia**.
 - `VersionCreate` = `{tipo, nombre, descripcion?, fecha_precios, ciudad_precios_id? (def. ciudad del proyecto), administracion_pct?="0", imprevistos_pct?="0", utilidad_pct?="0", iva_utilidad_pct?="0.19"}`
 - `VersionUpdate` = mismos campos opcionales (sin `tipo`). Solo BORRADOR (si no → 422 `BUSINESS_RULE`). Cambiar fecha/ciudad NO recalcula: el cliente llama `recalcular`.
 - **aprobar**: exige BORRADOR y ≥1 línea; congela `total_costo_directo` y `total_presupuesto`, `aprobado_at/por`; audita `APROBAR`. Desde ahí la versión y sus líneas son inmutables (toda escritura → 422).
-- **cerrar**: exige APROBADO; audita `CERRAR`.
-- `VersionCopy` = `{tipo, nombre, descripcion?, presupuesto_id_destino? (def. mismo), recalcular_precios?=false, fecha_precios?}` — copia AIU, líneas y snapshot de insumos; `version_origen_id` = origen; si `recalcular_precios`, revaloriza líneas de origen APU a la nueva fecha. Audita `COPIAR`.
-- `RecalculoOut` = `{version_id, lineas_recalculadas, insumos_sin_precio: [insumo_id], total_costo_directo}` — solo BORRADOR; revaloriza líneas con `origen_unitario=APU` (regenera snapshot desde el APU vigente). Audita `RECALCULAR`.
+- **cerrar**: exige APROBADO; audita `CERRAR`. APROBADO → CERRADO es la única transición desde APROBADO.
+- **Concurrencia**: toda escritura sobre una versión (líneas, parámetros, aprobar, cerrar, recalcular, importar) bloquea la fila de la versión (`SELECT ... FOR UPDATE` en PostgreSQL) y valida el estado leído de la BD; una edición que empezó en BORRADOR y termina después de que otro usuario aprobó responde 422.
+- `VersionCopy` = `{tipo, nombre, descripcion?, presupuesto_id_destino? (def. mismo), recalcular_precios?=false, fecha_precios?}` — copia AIU, líneas y snapshot de insumos; `version_origen_id` = origen; si `recalcular_precios`, revaloriza líneas de origen APU a la nueva fecha con el APU **activo** del ítem (sin APU activo conservan el valor de origen; `detalle.items_sin_apu` en la auditoría). Audita `COPIAR`.
+- `RecalculoOut` = `{version_id, lineas_recalculadas, insumos_sin_precio: [insumo_id], items_sin_apu: [item_id], total_costo_directo}` — solo BORRADOR; revaloriza líneas con `origen_unitario=APU` (regenera snapshot desde el APU **activo**). Las líneas cuyo ítem no tiene APU activo NO se revalorizan y se listan en `items_sin_apu` (v0.2.1). Audita `RECALCULAR`.
 
 ### 4.3 Líneas
 
@@ -291,11 +297,16 @@ valida el token de Entra: **el resto del contrato no cambia**.
 - `CapituloTotal` = `{capitulo_id, codigo, descripcion, valor, participacion_pct, num_lineas}`
 - `ExplosionOut` = `{version_id, filas: [ExplosionFila], por_tipo: [{tipo, valor_total, participacion_pct}], total_insumos, valor_sin_desglose, total}`
   - `ExplosionFila` = `{insumo_id, insumo_codigo, insumo_descripcion, unidad_codigo, tipo, cantidad_total, precio_unitario, valor_total, participacion_pct}` (`precio_unitario` = `valor_total / cantidad_total`, es un **precio medio ponderado**: puede diferir unos decimales del precio de lista; el frontend lo rotula "Precio prom.").
-  - El valor de cada combinación línea × insumo se redondea a pesos antes de sumar, por eso
-    `total_insumos + valor_sin_desglose` puede diferir unos pesos del `costo_directo` (que suma
-    totales de línea). Es esperado y está probado.
+  - Cada combinación línea × insumo se valoriza con la cantidad **exacta**
+    (`cant_línea·cant_unitaria·(1+desperdicio)`) y se redondea a pesos; `cantidad_total` se
+    redondea a 4 decimales solo para mostrar (v0.2.1: antes se valorizaba la cantidad ya
+    redondeada y con insumos caros descuadraba miles de pesos por fila). Por el redondeo a pesos
+    por fila y del APU, `total_insumos + valor_sin_desglose` puede diferir del `costo_directo` en
+    pocos pesos (del orden del número de filas). Es esperado y está probado.
+  - El tipo de cada insumo es el del maestro; como no se puede cambiar mientras el insumo esté
+    en versiones APROBADAS/CERRADAS, la explosión por tipo de esas versiones es inmutable.
   - `valor_sin_desglose` = suma de líneas MANUAL/IMPORTADO sin snapshot (para cuadrar contra el costo directo).
-- Fórmulas: `app.modules.adpro.calculos` (`calcular_aiu`, `cantidad_total_insumo`, `valor_total_insumo`).
+- Fórmulas: `app.modules.adpro.calculos` (`calcular_aiu`, `cantidad_exacta_insumo`, `cantidad_total_insumo` (q4, para mostrar), `valor_total_insumo`).
 
 ---
 
@@ -374,12 +385,16 @@ valida el token de Entra: **el resto del contrato no cambia**.
   `codigo_item | descripcion | unidad | cantidad | valor_unitario | observacion`
   (`descripcion`/`unidad` informativas; `valor_unitario` vacío = tomar del APU; con valor = `IMPORTADO`).
 - `modo` ∈ `agregar` (def.: crea nuevas, actualiza existentes) | `reemplazar` (borra las líneas y carga).
+- Números escritos como **texto** en `cantidad`/`valor_unitario` (misma regla que el frontend,
+  `decIn`): `1250.5`, `1250,5`, `1.250,5`, `250.000` (= 250 000, punto de miles). Cualquier otro
+  formato (p. ej. US `1,250.50` o `1,250,000`) es **error de fila**, nunca se adivina el separador.
 - **Todo o nada**: si hay errores no se aplica nada. Los errores de **contenido** del archivo
   responden `200` con `aplicado=false` y la lista `errores` (fila/columna), para que el usuario los
   corrija todos de una vez; el frontend debe revisar `aplicado`. Errores de **forma** (modo
   inválido, archivo vacío, > 10 MB, no es .xlsx, versión no BORRADOR) responden `422 BUSINESS_RULE`.
 - La escritura la hace `presupuesto.aplicar_lineas` (mismas reglas que la carga por API).
   `ImportResultado` = `{aplicado, lineas_creadas, lineas_actualizadas, lineas_eliminadas, errores: [{fila, columna, mensaje}], advertencias: [str]}`. Solo versiones BORRADOR. Audita `IMPORTAR`.
+- Exportaciones: todo texto que empiece por `= + - @`, TAB o CR se escribe como **texto** (nunca fórmula) para evitar inyección de fórmulas en Excel (`excel.asignar_celda`).
 
 ---
 
@@ -390,11 +405,14 @@ otro agente aún no termine; el dueño DEBE implementarlas exactamente así.
 
 | Proveedor | Firma | Consumidores |
 |---|---|---|
-| fundación (`calculos.py`) | `redondear_pesos, q4, q6, valor_componente, valor_unitario_apu, valor_total_linea, cantidad_total_insumo, valor_total_insumo, calcular_aiu, variacion_pct, participacion_pct, es_periodo_valido` | todos |
+| fundación (`calculos.py`) | `redondear_pesos, q4, q6, asegurar_rango, valor_componente, valor_unitario_apu, valor_total_linea, cantidad_exacta_insumo, cantidad_total_insumo, valor_total_insumo, calcular_aiu, variacion_pct, participacion_pct, es_periodo_valido` | todos |
+| fundación (`core/query.py`) | `contiene(col, q)` — búsqueda "contiene" con `lower() LIKE` y comodines escapados (usa los índices `pg_trgm`) | todos |
+| fundación (`core/schemas.py`) | `Int32`, `Id` — enteros de entrada acotados a INTEGER | todos |
 | fundación (`valorizacion.py`) | `precios_vigentes(db, insumo_ids, ciudad_id, fecha)`, `precio_vigente(db, insumo_id, ciudad_id, fecha)`, `valorizar_apu(db, apu, ciudad_id, fecha) -> ValorizacionApu` — **fuente única** de la regla de precio vigente | maestros, apu, presupuesto, control |
 | maestros | `precio_vigente(db, insumo_id, fecha, ciudad_id)` y `precios_vigentes(db, ciudad_id, fecha, insumo_ids) -> list[PrecioVigente]` (404 si la ciudad no existe): **fachadas** sobre `valorizacion` para consumidores externos al dominio de costos. Ojo: el orden de argumentos difiere del de `valorizacion`; llámelas con argumentos con nombre | futuros módulos (compras, contratos) |
 | presupuesto | `obtener_version(db, version_id) -> PresupuestoVersion` (404) | control |
 | presupuesto | `asegurar_editable(version) -> None` (422 si no es BORRADOR) | control |
+| presupuesto | `obtener_version_para_escritura(db, version_id) -> PresupuestoVersion` (404; bloquea la fila con `FOR UPDATE` y refresca el estado). Úsela antes de `asegurar_editable` en toda escritura | control, futuros |
 | presupuesto | `calcular_resumen(db, version_id) -> schemas.ResumenOut` | control (Excel) |
 | presupuesto | `calcular_explosion(db, version_id, tipo: TipoInsumo \| None = None) -> schemas.ExplosionOut` | control (Excel, comparativo) |
 | presupuesto | `aplicar_lineas(db, version_id, lineas: list[schemas.LineaCreate], *, modo: Literal["agregar","reemplazar"], origen_manual: OrigenValor = OrigenValor.MANUAL, commit: bool = True) -> dict[str, int]` (`{creadas, actualizadas, eliminadas}`; lanza `BusinessRuleError` con `details` por línea) | control (importación) |

@@ -10,11 +10,17 @@ Convenciones de contrato JSON:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
+
+# Enteros de entrada que se guardan en columnas INTEGER (int32 en PostgreSQL): ids, orden, etc.
+# Sin este límite, 99999999999 pasa la validación y PostgreSQL responde 'integer out of range'.
+INT32_MAX = 2_147_483_647
+Int32 = Annotated[int, Field(ge=-INT32_MAX - 1, le=INT32_MAX)]
+Id = Annotated[int, Field(ge=1, le=INT32_MAX)]
 
 
 class ORMModel(BaseModel):

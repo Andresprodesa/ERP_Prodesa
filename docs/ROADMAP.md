@@ -25,6 +25,14 @@
       con APU, versión BASE aprobada y CONTROL en borrador, compromisos y 3 meses de ejecución.
 - [x] DevOps local: `scripts/dev.ps1` / `scripts/dev.sh`, docker-compose (PostgreSQL + backend +
       frontend), CI en GitHub Actions (ruff, pytest, migraciones en PostgreSQL, build).
+- [x] Correcciones de la revisión de dominio y arquitectura (v0.2.1): inmutabilidad bajo
+      concurrencia, explosión con cantidades exactas, lectura estricta de números en Excel,
+      inyección de fórmulas, rangos → 422, secretos/puertos de Docker, UTC, auditoría de APU,
+      pytest sobre PostgreSQL en CI.
+- [ ] Pendientes conocidos de la revisión: paginación (`Page[T]`) en listados que crecen
+      (`/presupuestos`, `/versiones/{vid}/lineas`, `/maestros/proyectos`, `/maestros/listas-precios`,
+      `/control/ejecucion`, `/control/tablero/items`); rate limiting del login local; serialización
+      uniforme de decimales (hoy algunos totales salen con 0 y otros con 4 decimales).
 - [ ] Presentación a la Dirección y decisión sobre la Fase 1.
 - [ ] Revisión jurídica de la licencia de Sinco (bloqueante para usar cualquier dato extraído).
 

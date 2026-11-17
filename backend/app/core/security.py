@@ -112,9 +112,17 @@ def get_identity_provider() -> IdentityProvider:
     return LocalJWTProvider()
 
 
+# Hash ficticio: si el usuario no existe se verifica igual contra él, para que el tiempo de
+# respuesta no revele qué usuarios existen. (Pendiente para exposición en red: rate limiting
+# por IP/usuario y bloqueo temporal; ver docs/ESTRATEGIA_PRODUCCION.md.)
+_HASH_FICTICIO = bcrypt.hashpw(b"usuario-inexistente", bcrypt.gensalt()).decode("utf-8")
+
+
 def authenticate(db: Session, username: str, password: str) -> Usuario:
     user = db.scalar(select(Usuario).where(Usuario.username == username))
-    if user is None or not user.activo or not verify_password(password, user.hashed_password):
+    hashed = user.hashed_password if user is not None and user.hashed_password else _HASH_FICTICIO
+    clave_ok = verify_password(password, hashed)
+    if user is None or not user.activo or not user.hashed_password or not clave_ok:
         raise AuthError("Usuario o contraseña incorrectos", code="INVALID_CREDENTIALS")
     return user
 

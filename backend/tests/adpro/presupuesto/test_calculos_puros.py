@@ -65,21 +65,20 @@ def test_explosion_con_desperdicio_y_redondeo() -> None:
         # Muro 100.5 M2: cemento 2 KG +5 % -> 211.05 KG ; MO 0.5 HR -> 50.25 HR
         FilaSnapshot(1, D("100.5"), D("2"), D("0.05"), D("1000")),
         FilaSnapshot(2, D("100.5"), D("0.5"), D("0"), D("20000")),
-        # Concreto 12.35 M3: cemento 350 +3 % -> 4452.175 ; arena 0.55 +10 % -> 7.47175 -> 7.4718 (q4)
+        # Concreto 12.35 M3: cemento 350 +3 % -> 4452.175 ; arena 0.55 +10 % -> 7.47175 (se muestra
+        # 7.4718; se valoriza con la exacta: 7.47175 · 50000 = 373587.5 -> 373588)
         FilaSnapshot(1, D("12.35"), D("350"), D("0.03"), D("1000")),
         FilaSnapshot(3, D("12.35"), D("0.55"), D("0.10"), D("50000")),
-        # equipo 0.333333 -> 4.11666255 -> 4.1167 ; 4.1167 · 8000 = 32933.6 -> 32934
+        # equipo 0.333333 -> 4.11666255 (muestra 4.1167) ; 4.11666255 · 8000 = 32933.30 -> 32933
         FilaSnapshot(4, D("12.35"), D("0.333333"), D("0"), D("8000")),
     ]
     r = explotar_insumos(filas)
     assert (r[1].cantidad_total, r[1].valor_total) == (D("4663.225"), D("4663225"))
     assert r[1].precio_unitario == D("1000.0000")
     assert (r[2].cantidad_total, r[2].valor_total) == (D("50.25"), D("1005000"))
-    assert (r[3].cantidad_total, r[3].valor_total) == (D("7.4718"), D("373590"))
-    assert (r[4].cantidad_total, r[4].valor_total) == (D("4.1167"), D("32934"))
-    assert r[4].precio_unitario == D(
-        "8000.0972"
-    )  # 32934 / 4.1167 (precio medio = valor/cantidad, contrato §4.4)
+    assert (r[3].cantidad_total, r[3].valor_total) == (D("7.4718"), D("373588"))
+    assert (r[4].cantidad_total, r[4].valor_total) == (D("4.1167"), D("32933"))
+    assert r[4].precio_unitario == D("7999.8543")  # 32933 / 4.1167 (precio medio = valor/cantidad, §4.4)
 
 
 def test_explosion_vacia_y_cantidad_cero() -> None:

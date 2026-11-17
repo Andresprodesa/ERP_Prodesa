@@ -27,8 +27,9 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import Accion, registrar_auditoria
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.query import contiene
 from app.modules.adpro import valorizacion
-from app.modules.adpro.enums import NivelEdt, TipoInsumo
+from app.modules.adpro.enums import EstadoVersion, NivelEdt, TipoInsumo
 from app.modules.adpro.models import (
     Apu,
     ApuInsumo,
@@ -40,7 +41,9 @@ from app.modules.adpro.models import (
     ListaPrecios,
     PrecioInsumo,
     Presupuesto,
+    PresupuestoLinea,
     PresupuestoLineaInsumo,
+    PresupuestoVersion,
     Proyecto,
     Torre,
     Unidad,
@@ -72,8 +75,14 @@ def _aplicar(obj: Any, cambios: dict[str, Any]) -> None:
         setattr(obj, k, v)
 
 
-def _like(q: str) -> str:
-    return f"%{q.strip().lower()}%"
+def _aplicar_auditado(db: Session, obj: Any, cambios: dict[str, Any], entidad: str) -> None:
+    """Aplica ``cambios`` y registra ACTUALIZAR con antes/después de los campos que cambian."""
+    diff = {k: {"antes": getattr(obj, k), "despues": v} for k, v in cambios.items() if getattr(obj, k) != v}
+    _aplicar(obj, cambios)
+    if diff:
+        registrar_auditoria(
+            db, accion=Accion.ACTUALIZAR, entidad=entidad, entidad_id=obj.id, detalle={"cambios": diff}
+        )
 
 
 def _commit(db: Session, obj: Any) -> None:
@@ -110,9 +119,7 @@ def obtener_unidad(db: Session, unidad_id: int) -> Unidad:
 def listar_unidades(db: Session, *, q: str | None = None, activo: bool | None = None) -> list[Unidad]:
     stmt = select(Unidad)
     if q:
-        stmt = stmt.where(
-            or_(func.lower(Unidad.codigo).like(_like(q)), func.lower(Unidad.nombre).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(Unidad.codigo, q), contiene(Unidad.nombre, q)))
     if activo is not None:
         stmt = stmt.where(Unidad.activo.is_(activo))
     return list(db.scalars(stmt.order_by(Unidad.codigo)))
@@ -131,7 +138,7 @@ def actualizar_unidad(db: Session, unidad_id: int, data: s.UnidadUpdate) -> Unid
     cambios = _cambios(data)
     if cambios.get("codigo") and cambios["codigo"] != unidad.codigo:
         _codigo_unico(db, Unidad, cambios["codigo"], "una unidad", excluir_id=unidad.id)
-    _aplicar(unidad, {k: v for k, v in cambios.items() if v is not None})
+    _aplicar_auditado(db, unidad, {k: v for k, v in cambios.items() if v is not None}, "unidad")
     _commit(db, unidad)
     return unidad
 
@@ -146,9 +153,7 @@ def obtener_ciudad(db: Session, ciudad_id: int) -> Ciudad:
 def listar_ciudades(db: Session, *, q: str | None = None, activo: bool | None = None) -> list[Ciudad]:
     stmt = select(Ciudad)
     if q:
-        stmt = stmt.where(
-            or_(func.lower(Ciudad.codigo).like(_like(q)), func.lower(Ciudad.nombre).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(Ciudad.codigo, q), contiene(Ciudad.nombre, q)))
     if activo is not None:
         stmt = stmt.where(Ciudad.activo.is_(activo))
     return list(db.scalars(stmt.order_by(Ciudad.codigo)))
@@ -170,7 +175,7 @@ def actualizar_ciudad(db: Session, ciudad_id: int, data: s.CiudadUpdate) -> Ciud
             cambios.pop(campo)
     if cambios.get("codigo") and cambios["codigo"] != ciudad.codigo:
         _codigo_unico(db, Ciudad, cambios["codigo"], "una ciudad", excluir_id=ciudad.id)
-    _aplicar(ciudad, cambios)
+    _aplicar_auditado(db, ciudad, cambios, "ciudad")
     _commit(db, ciudad)
     return ciudad
 
@@ -194,9 +199,7 @@ def listar_insumos(
 ) -> tuple[list[Insumo], int]:
     stmt = select(Insumo)
     if q:
-        stmt = stmt.where(
-            or_(func.lower(Insumo.codigo).like(_like(q)), func.lower(Insumo.descripcion).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(Insumo.codigo, q), contiene(Insumo.descripcion, q)))
     if tipo is not None:
         stmt = stmt.where(Insumo.tipo == tipo)
     if activo is not None:
@@ -218,6 +221,21 @@ def insumo_en_uso(db: Session, insumo_id: int) -> bool:
         if db.scalar(stmt) is not None:
             return True
     return False
+
+
+def insumo_en_version_no_editable(db: Session, insumo_id: int) -> bool:
+    """True si el insumo está en el snapshot de alguna versión APROBADA o CERRADA."""
+    stmt = (
+        select(PresupuestoLineaInsumo.id)
+        .join(PresupuestoLinea, PresupuestoLinea.id == PresupuestoLineaInsumo.linea_id)
+        .join(PresupuestoVersion, PresupuestoVersion.id == PresupuestoLinea.version_id)
+        .where(
+            PresupuestoLineaInsumo.insumo_id == insumo_id,
+            PresupuestoVersion.estado != EstadoVersion.BORRADOR,
+        )
+        .limit(1)
+    )
+    return db.scalar(stmt) is not None
 
 
 def crear_insumo(db: Session, data: s.InsumoCreate) -> Insumo:
@@ -244,8 +262,20 @@ def actualizar_insumo(db: Session, insumo_id: int, data: s.InsumoUpdate) -> Insu
             )
         _codigo_unico(db, Insumo, cambios["codigo"], "un insumo", excluir_id=insumo.id)
     if "unidad_id" in cambios and cambios["unidad_id"] != insumo.unidad_id:
+        if insumo_en_uso(db, insumo.id):
+            raise BusinessRuleError(
+                f"No se puede cambiar la unidad del insumo '{insumo.codigo}': está usado en APU, "
+                "presupuestos o compromisos (sus cantidades quedarían en otra unidad)",
+                details={"insumo_id": insumo.id},
+            )
         _ref_activa(db, Unidad, cambios["unidad_id"], "La unidad")
-    _aplicar(insumo, cambios)
+    if "tipo" in cambios and cambios["tipo"] != insumo.tipo and insumo_en_version_no_editable(db, insumo.id):
+        raise BusinessRuleError(
+            f"No se puede cambiar el tipo del insumo '{insumo.codigo}': está en versiones de "
+            "presupuesto APROBADAS o CERRADAS (su explosión por tipo es inmutable)",
+            details={"insumo_id": insumo.id},
+        )
+    _aplicar_auditado(db, insumo, cambios, "insumo")
     _commit(db, insumo)
     return insumo
 
@@ -395,9 +425,7 @@ def listar_precios_lista(
         .where(PrecioInsumo.lista_id == lista_id)
     )
     if q:
-        stmt = stmt.where(
-            or_(func.lower(Insumo.codigo).like(_like(q)), func.lower(Insumo.descripcion).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(Insumo.codigo, q), contiene(Insumo.descripcion, q)))
     if tipo is not None:
         stmt = stmt.where(Insumo.tipo == tipo)
     total = (
@@ -503,9 +531,7 @@ def listar_proyectos(
 ) -> list[Proyecto]:
     stmt = select(Proyecto)
     if q:
-        stmt = stmt.where(
-            or_(func.lower(Proyecto.codigo).like(_like(q)), func.lower(Proyecto.nombre).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(Proyecto.codigo, q), contiene(Proyecto.nombre, q)))
     if estado is not None:
         stmt = stmt.where(Proyecto.estado == estado)
     if tipo is not None:
@@ -590,7 +616,7 @@ def actualizar_etapa(db: Session, etapa_id: int, data: s.EtapaUpdate) -> Etapa:
             raise BusinessRuleError(f"El campo '{campo}' no puede quedar vacío", details={"campo": campo})
     if "codigo" in cambios and cambios["codigo"] != etapa.codigo:
         _etapa_codigo_unico(db, etapa.proyecto_id, cambios["codigo"], excluir_id=etapa.id)
-    _aplicar(etapa, cambios)
+    _aplicar_auditado(db, etapa, cambios, "etapa")
     _commit(db, etapa)
     return etapa
 
@@ -643,13 +669,20 @@ def actualizar_torre(db: Session, torre_id: int, data: s.TorreUpdate) -> Torre:
             raise BusinessRuleError(f"El campo '{campo}' no puede quedar vacío", details={"campo": campo})
     if "codigo" in cambios and cambios["codigo"] != torre.codigo:
         _torre_codigo_unico(db, torre.etapa_id, cambios["codigo"], excluir_id=torre.id)
-    _aplicar(torre, cambios)
+    _aplicar_auditado(db, torre, cambios, "torre")
     _commit(db, torre)
     return torre
 
 
 def eliminar_torre(db: Session, torre_id: int) -> None:
     torre = obtener_torre(db, torre_id)
+    registrar_auditoria(
+        db,
+        accion=Accion.ELIMINAR,
+        entidad="torre",
+        entidad_id=torre.id,
+        detalle={"etapa_id": torre.etapa_id, "codigo": torre.codigo},
+    )
     db.delete(torre)
     db.commit()
 
@@ -699,9 +732,7 @@ def listar_edt(
     if parent_id is not None:
         stmt = stmt.where(EdtNodo.parent_id == parent_id)
     if q:
-        stmt = stmt.where(
-            or_(func.lower(EdtNodo.codigo).like(_like(q)), func.lower(EdtNodo.descripcion).like(_like(q)))
-        )
+        stmt = stmt.where(or_(contiene(EdtNodo.codigo, q), contiene(EdtNodo.descripcion, q)))
     if activo is not None:
         stmt = stmt.where(EdtNodo.activo.is_(activo))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0

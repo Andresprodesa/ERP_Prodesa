@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.core.schemas import ORMModel
+from app.core.schemas import Int32, ORMModel
 from app.modules.adpro.enums import EstadoVersion, OrigenValor, TipoInsumo, TipoVersion
 
 
@@ -129,6 +129,8 @@ class RecalculoOut(BaseModel):
     version_id: int
     lineas_recalculadas: int
     insumos_sin_precio: list[int]
+    # ítems de líneas origen APU que NO se revalorizaron (su APU no existe o está inactivo)
+    items_sin_apu: list[int] = Field(default_factory=list)
     total_costo_directo: Decimal
 
 
@@ -146,7 +148,7 @@ class LineaUpdate(BaseModel):
     cantidad: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=4)
     valor_unitario: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=4)
     observacion: str | None = Field(default=None, max_length=500)
-    orden: int | None = None
+    orden: Int32 | None = None
 
 
 class LineasLote(BaseModel):

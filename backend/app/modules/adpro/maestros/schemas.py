@@ -15,7 +15,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from app.core.schemas import AuditFields
+from app.core.schemas import AuditFields, Int32
 from app.modules.adpro.enums import EstadoProyecto, NivelEdt, TipoInsumo, TipoProyecto
 from app.modules.adpro.models import (
     EdtNodo,
@@ -304,14 +304,14 @@ class TorreOut(AuditFields):
 class EtapaCreate(_In):
     codigo: Codigo30
     nombre: Texto200
-    orden: int = 0
+    orden: Int32 = 0
     numero_unidades: EnteroNoNegativo | None = None
 
 
 class EtapaUpdate(_In):
     codigo: Codigo30 | None = None
     nombre: Texto200 | None = None
-    orden: int | None = None
+    orden: Int32 | None = None
     numero_unidades: EnteroNoNegativo | None = None
 
 
@@ -428,7 +428,7 @@ class EdtNodoCreate(_In):
     codigo: Codigo30
     descripcion: Texto300
     unidad_id: int | None = None
-    orden: int | None = None
+    orden: Int32 | None = None
     notas: TextoLibre | None = None
 
     @field_validator("codigo")
@@ -444,7 +444,7 @@ class EdtNodoCreate(_In):
 class EdtNodoUpdate(_In):
     descripcion: Texto300 | None = None
     unidad_id: int | None = None
-    orden: int | None = None
+    orden: Int32 | None = None
     activo: bool | None = None
     notas: TextoLibre | None = None
 

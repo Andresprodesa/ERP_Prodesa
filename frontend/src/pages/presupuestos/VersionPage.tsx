@@ -477,6 +477,8 @@ export default function VersionPage() {
         const r = await api.presupuestos.recalcular(vid);
         return `Recalculadas ${r.lineas_recalculadas} líneas · CD ${cop(r.total_costo_directo)}${
           r.insumos_sin_precio.length ? ` · ${r.insumos_sin_precio.length} insumos sin precio` : ""
+        }${
+          r.items_sin_apu?.length ? ` · ${r.items_sin_apu.length} ítems sin APU activo (conservan su valor)` : ""
         }`;
       }
       if (a === "aprobar") {
