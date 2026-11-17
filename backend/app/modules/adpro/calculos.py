@@ -115,6 +115,17 @@ def calcular_aiu(
     )
 
 
+def participacion_pct(parte: Decimal | int | str, total: Decimal | int | str) -> Decimal | None:
+    """parte / total como FRACCIÓN con 6 decimales (participación o % de avance).
+
+    None si el total es 0 (no hay base contra la cual medir).
+    """
+    t = to_decimal(total)
+    if t == ZERO:
+        return None
+    return q6(to_decimal(parte) / t)
+
+
 # --- Control -----------------------------------------------------------------------------
 def variacion_pct(base: Decimal | None, comparado: Decimal | None) -> Decimal | None:
     """(comparado - base) / base como fracción (6 decimales). None si la base es 0/None."""

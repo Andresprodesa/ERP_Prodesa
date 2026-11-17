@@ -56,6 +56,13 @@ def test_linea_explosion_variacion_periodo() -> None:
     assert c.es_periodo_valido("2026-11") and not c.es_periodo_valido("2026-13")
 
 
+def test_participacion_pct() -> None:
+    assert c.participacion_pct(D("6074746"), D("6355248")) == D("0.955863")
+    assert c.participacion_pct(D("1"), D("3")) == D("0.333333")
+    assert c.participacion_pct(D("5"), D("0")) is None
+    assert c.participacion_pct(0, 10) == D("0.000000")
+
+
 def test_nivel_edt_jerarquia() -> None:
     assert NivelEdt.CAPITULO.padre_requerido is None
     assert NivelEdt.ITEM.padre_requerido is NivelEdt.GRUPO
