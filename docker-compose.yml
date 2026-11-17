@@ -1,0 +1,24 @@
+# Perfil "prod-like": PostgreSQL 16 local para validar que el backend funciona fuera de SQLite.
+# Uso:  docker compose up -d db   ->  DATABASE_URL=postgresql+psycopg://erp:<POSTGRES_PASSWORD>@localhost:5432/erp_prodesa
+# Las credenciales salen de .env (ver .env.example). Son SOLO de desarrollo.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: erp_prodesa_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-erp_prodesa}
+      POSTGRES_USER: ${POSTGRES_USER:-erp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en .env}
+      TZ: America/Bogota
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - erp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp} -d ${POSTGRES_DB:-erp_prodesa}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  erp_pgdata:
