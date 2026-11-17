@@ -29,6 +29,17 @@ def _is_sqlite(url: str) -> bool:
     return url.startswith("sqlite")
 
 
+# Índices creados a mano en migraciones y específicos de PostgreSQL (GIN + pg_trgm, ver 0002).
+# No están en los modelos, así que autogenerate / ``alembic check`` deben ignorarlos.
+_INDICES_SOLO_MIGRACION = ("ix_trgm_",)
+
+
+def _include_object(obj, name, type_, reflected, compare_to) -> bool:  # type: ignore[no-untyped-def]
+    if type_ == "index" and reflected and name and name.startswith(_INDICES_SOLO_MIGRACION):
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
     context.configure(
@@ -38,6 +49,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         render_as_batch=_is_sqlite(url),
         compare_type=True,
+        include_object=_include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -63,6 +75,7 @@ def _run(connection) -> None:  # type: ignore[no-untyped-def]
         target_metadata=target_metadata,
         render_as_batch=connection.dialect.name == "sqlite",
         compare_type=True,
+        include_object=_include_object,
     )
     with context.begin_transaction():
         context.run_migrations()

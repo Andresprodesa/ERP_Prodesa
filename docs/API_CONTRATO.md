@@ -39,6 +39,14 @@ Siempre con este cuerpo:
 | 422 | `VALIDATION_ERROR` | Esquema inválido (`details` = lista `{loc, msg, type}`) |
 | 422 | `BUSINESS_RULE` | Regla de negocio (p. ej. versión no editable) |
 
+Precisiones (acordadas en la integración v0.2):
+- Un id **inexistente en la ruta** responde `404`. Una referencia inválida o inactiva **dentro del
+  cuerpo** (`unidad_id`, `ciudad_id`, `parent_id`, `copiar_de_lista_id`, `item_id`...) responde
+  `422 BUSINESS_RULE`.
+- Los requests rechazan campos desconocidos (`extra=forbid`) con `422 VALIDATION_ERROR`.
+- Campos de texto/código anulables: `unidad_codigo`, `capitulo_id`, `capitulo_codigo` y
+  `capitulo_descripcion` pueden venir en `null` (el frontend lo modela como `T | null`).
+
 ### 0.2 Enumeraciones
 
 | Enum | Valores |
@@ -141,6 +149,9 @@ valida el token de Entra: **el resto del contrato no cambia**.
 - `ListaPreciosUpdate` = `{nombre?, activo?, observaciones?}` (ciudad y fecha son inmutables).
 - `PrecioIn` = `{insumo_id, precio, fuente?}` (precio ≥ 0); `PrecioOut` = `{id, insumo_id, insumo_codigo, insumo_descripcion, unidad_codigo, tipo, precio, fuente}`
 - `PrecioVigenteOut` = `{insumo_id, precio, lista_id, fecha_desde}`; usa `app.modules.adpro.valorizacion.precios_vigentes`. Insumos sin precio no aparecen.
+  `ciudad_id` e `insumo_ids` son obligatorios; `fecha` es opcional (por defecto, hoy).
+- `UnidadUpdate`/`CiudadUpdate`/`EtapaUpdate`/`TorreUpdate` aceptan `codigo` (409 si se duplica);
+  `ProyectoUpdate` no permite cambiar el código.
 
 ### 2.4 Proyectos, etapas y torres
 
@@ -279,7 +290,10 @@ valida el token de Entra: **el resto del contrato no cambia**.
 - `ResumenOut` = `{version_id, capitulos: [CapituloTotal], costo_directo, administracion_pct, imprevistos_pct, utilidad_pct, iva_utilidad_pct, administracion, imprevistos, utilidad, iva_utilidad, total_aiu, total, num_lineas, lineas_sin_precio}`
 - `CapituloTotal` = `{capitulo_id, codigo, descripcion, valor, participacion_pct, num_lineas}`
 - `ExplosionOut` = `{version_id, filas: [ExplosionFila], por_tipo: [{tipo, valor_total, participacion_pct}], total_insumos, valor_sin_desglose, total}`
-  - `ExplosionFila` = `{insumo_id, insumo_codigo, insumo_descripcion, unidad_codigo, tipo, cantidad_total, precio_unitario, valor_total, participacion_pct}` (`precio_unitario` = `valor_total / cantidad_total`).
+  - `ExplosionFila` = `{insumo_id, insumo_codigo, insumo_descripcion, unidad_codigo, tipo, cantidad_total, precio_unitario, valor_total, participacion_pct}` (`precio_unitario` = `valor_total / cantidad_total`, es un **precio medio ponderado**: puede diferir unos decimales del precio de lista; el frontend lo rotula "Precio prom.").
+  - El valor de cada combinación línea × insumo se redondea a pesos antes de sumar, por eso
+    `total_insumos + valor_sin_desglose` puede diferir unos pesos del `costo_directo` (que suma
+    totales de línea). Es esperado y está probado.
   - `valor_sin_desglose` = suma de líneas MANUAL/IMPORTADO sin snapshot (para cuadrar contra el costo directo).
 - Fórmulas: `app.modules.adpro.calculos` (`calcular_aiu`, `cantidad_total_insumo`, `valor_total_insumo`).
 
@@ -300,7 +314,7 @@ valida el token de Entra: **el resto del contrato no cambia**.
   - `diferencia_unitaria = unitario_comparado − unitario_base`; `impacto = total_comparado − total_base`;
     `variacion_pct = impacto / total_base` (null si base = 0) → `calculos.variacion_pct`.
   - `estado` ∈ `IGUAL`, `MODIFICADO`, `NUEVO` (solo en comparada), `ELIMINADO` (solo en base).
-  - Nivel `insumo`: usa el snapshot `presupuesto_linea_insumo` (cantidad total y valor por insumo, como la explosión).
+  - Nivel `insumo`: usa el snapshot `presupuesto_linea_insumo` (cantidad total y valor por insumo); se calcula con `presupuesto.calcular_explosion`, así que cuadra con la explosión. Las líneas MANUAL/IMPORTADO sin snapshot no entran, por lo que su total puede ser menor que el del nivel `item`.
 
 ### 5.2 Compromisos (órdenes / contratos simplificados)
 
@@ -360,7 +374,11 @@ valida el token de Entra: **el resto del contrato no cambia**.
   `codigo_item | descripcion | unidad | cantidad | valor_unitario | observacion`
   (`descripcion`/`unidad` informativas; `valor_unitario` vacío = tomar del APU; con valor = `IMPORTADO`).
 - `modo` ∈ `agregar` (def.: crea nuevas, actualiza existentes) | `reemplazar` (borra las líneas y carga).
-- **Todo o nada**: si hay errores no se aplica nada.
+- **Todo o nada**: si hay errores no se aplica nada. Los errores de **contenido** del archivo
+  responden `200` con `aplicado=false` y la lista `errores` (fila/columna), para que el usuario los
+  corrija todos de una vez; el frontend debe revisar `aplicado`. Errores de **forma** (modo
+  inválido, archivo vacío, > 10 MB, no es .xlsx, versión no BORRADOR) responden `422 BUSINESS_RULE`.
+- La escritura la hace `presupuesto.aplicar_lineas` (mismas reglas que la carga por API).
   `ImportResultado` = `{aplicado, lineas_creadas, lineas_actualizadas, lineas_eliminadas, errores: [{fila, columna, mensaje}], advertencias: [str]}`. Solo versiones BORRADOR. Audita `IMPORTAR`.
 
 ---
@@ -372,8 +390,9 @@ otro agente aún no termine; el dueño DEBE implementarlas exactamente así.
 
 | Proveedor | Firma | Consumidores |
 |---|---|---|
-| fundación (`calculos.py`) | `redondear_pesos, q4, valor_componente, valor_unitario_apu, valor_total_linea, cantidad_total_insumo, valor_total_insumo, calcular_aiu, variacion_pct, es_periodo_valido` | todos |
-| fundación (`valorizacion.py`) | `precios_vigentes(db, insumo_ids, ciudad_id, fecha)`, `precio_vigente(...)`, `valorizar_apu(db, apu, ciudad_id, fecha) -> ValorizacionApu` | maestros, apu, presupuesto |
+| fundación (`calculos.py`) | `redondear_pesos, q4, q6, valor_componente, valor_unitario_apu, valor_total_linea, cantidad_total_insumo, valor_total_insumo, calcular_aiu, variacion_pct, participacion_pct, es_periodo_valido` | todos |
+| fundación (`valorizacion.py`) | `precios_vigentes(db, insumo_ids, ciudad_id, fecha)`, `precio_vigente(db, insumo_id, ciudad_id, fecha)`, `valorizar_apu(db, apu, ciudad_id, fecha) -> ValorizacionApu` — **fuente única** de la regla de precio vigente | maestros, apu, presupuesto, control |
+| maestros | `precio_vigente(db, insumo_id, fecha, ciudad_id)` y `precios_vigentes(db, ciudad_id, fecha, insumo_ids) -> list[PrecioVigente]` (404 si la ciudad no existe): **fachadas** sobre `valorizacion` para consumidores externos al dominio de costos. Ojo: el orden de argumentos difiere del de `valorizacion`; llámelas con argumentos con nombre | futuros módulos (compras, contratos) |
 | presupuesto | `obtener_version(db, version_id) -> PresupuestoVersion` (404) | control |
 | presupuesto | `asegurar_editable(version) -> None` (422 si no es BORRADOR) | control |
 | presupuesto | `calcular_resumen(db, version_id) -> schemas.ResumenOut` | control (Excel) |
@@ -383,3 +402,9 @@ otro agente aún no termine; el dueño DEBE implementarlas exactamente así.
 
 Regla: los routers nunca importan services de otro submódulo; solo los services pueden hacerlo,
 y únicamente usando las funciones de esta tabla.
+
+- `calculos.participacion_pct(parte, total) -> Decimal | None`: fracción con 6 decimales, `None` si
+  `total = 0`. Control la usa tal cual (porcentajes del tablero y Excel pueden ser `null`);
+  presupuesto la envuelve en `participacion(...)`, que devuelve `0` porque sus schemas exigen número.
+- apu, presupuesto y control obtienen precios **solo** vía `valorizacion` (ya integrada en
+  `valorizar_apu`); ninguno consulta `adpro_precio_insumo` directamente.

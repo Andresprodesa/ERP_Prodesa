@@ -76,4 +76,12 @@ cd frontend && npm install && npm run dev      # http://localhost:5173 (proxy /a
 
 ## Estado
 - v0.1: fundación lista (core, auth JWT, modelos ADPRO completos, migración `0001`, seed, tests de humo).
-- Pendiente: implementación de submódulos maestros/apu/presupuesto/control y frontend según contrato.
+- v0.2 (rama `feat/adpro-prototipo`): submódulos maestros, apu, presupuesto y control completos;
+  frontend React con todas las pantallas del flujo; datos demo sintéticos (`seed_demo.py`);
+  Docker/CI/scripts; docs de estrategia, propuesta y roadmap. Migración `0002`: índices GIN
+  `pg_trgm` para búsqueda por texto (solo PostgreSQL; no-op en SQLite).
+- Integración: control delega en el contrato interno de presupuesto (§6) para versiones,
+  explosión, resumen e importación; `calculos.participacion_pct` es la única fórmula de
+  participación. El precio vigente sale SOLO de `valorizacion` (maestros expone una fachada).
+- Pendiente: pantallas de alta/edición de unidades, ciudades, listas de precios, proyectos y EDT
+  en el frontend; vista de auditoría; probar el stack Docker con PostgreSQL localmente.

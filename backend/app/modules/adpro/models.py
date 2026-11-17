@@ -20,6 +20,9 @@ Decisiones clave (ver docs/ARQUITECTURA.md):
 - Porcentajes como FRACCIÓN (0.05 = 5 %). Dinero/cantidades Numeric(18,4); coeficientes
   APU Numeric(18,6).
 - AIU vive en la propia versión (cada versión congela su configuración).
+- Búsqueda por texto (filtros ``q``): en PostgreSQL la migración 0002 crea índices GIN
+  ``pg_trgm`` sobre ``lower(codigo)`` y ``lower(descripcion)`` de insumo y edt_nodo. No se
+  declaran aquí por ser específicos del motor (``alembic/env.py`` los excluye de autogenerate).
 """
 
 from __future__ import annotations
