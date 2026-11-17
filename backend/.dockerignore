@@ -1,0 +1,15 @@
+# Contexto de build del backend: solo lo que copia el Dockerfile.
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+tests/
+*.db
+*.sqlite*
+.env
+.env.*
+exports/

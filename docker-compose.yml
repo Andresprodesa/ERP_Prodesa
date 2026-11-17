@@ -1,6 +1,17 @@
-# Perfil "prod-like": PostgreSQL 16 local para validar que el backend funciona fuera de SQLite.
-# Uso:  docker compose up -d db   ->  DATABASE_URL=postgresql+psycopg://erp:<POSTGRES_PASSWORD>@localhost:5432/erp_prodesa
-# Las credenciales salen de .env (ver .env.example). Son SOLO de desarrollo.
+# =====================================================================================
+# ERP Prodesa - entorno "prod-like" local con Docker (requiere Docker Desktop).
+# Credenciales y secretos salen de .env (ver .env.example). Son SOLO de desarrollo.
+#
+#   Solo PostgreSQL (backend corriendo en el host con uvicorn):
+#     docker compose up -d db
+#     DATABASE_URL=postgresql+psycopg://erp:<POSTGRES_PASSWORD>@localhost:5432/erp_prodesa
+#
+#   Pila completa PostgreSQL + backend + frontend (perfil "app"):
+#     docker compose --profile app up --build
+#     -> http://localhost:8080 (SPA)   http://localhost:8000/docs (API)
+#
+#   Limpiar todo (incluye datos):  docker compose --profile app down -v
+# =====================================================================================
 services:
   db:
     image: postgres:16-alpine
@@ -19,6 +30,54 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    profiles: ["app"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: erp-prodesa-backend:local
+    container_name: erp_prodesa_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-erp}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-erp_prodesa}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      # Sin .env se usa el valor de DESARROLLO público de app/core/config.py (nunca en producción)
+      JWT_SECRET: ${JWT_SECRET:-dev-solo-local-cambiar-en-produccion}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      CORS_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+      DEV_ADMIN_USERNAME: ${DEV_ADMIN_USERNAME:-admin}
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:-}
+      DEV_USERS_PASSWORD: ${DEV_USERS_PASSWORD:-}
+      # true = carga datos SINTÉTICOS de demostración al arrancar (idempotente)
+      SEED_DEMO: ${SEED_DEMO:-true}
+      TZ: America/Bogota
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        if [ "$$SEED_DEMO" = "true" ]; then python -m app.seed; fi &&
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'
+    ports:
+      - "8000:8000"
+
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: erp-prodesa-frontend:local
+    container_name: erp_prodesa_frontend
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "8080:8080"
 
 volumes:
   erp_pgdata:
