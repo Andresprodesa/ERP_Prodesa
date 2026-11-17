@@ -1,0 +1,504 @@
+/* ==========================================================================
+   CSS PRO — Estándar visual front-end
+   Tema 1: prodesa-light   ·   v1.1
+   Origen:  interfaz2.html (Consola de Presupuestos · Prodesa)
+   Rige:    Manual de Marca Prodesa (paleta pág. 16, tipografía pág. 23,
+            tamaños de logo pág. 15, usos incorrectos pág. 13)
+
+   Uso:  <link rel="stylesheet" href="css_pro.css">
+         o pegar todo el archivo dentro de <style> ... </style>
+         (apps de un solo archivo HTML).
+
+   Regla de oro: NO se inventan colores, tamaños ni radios fuera de los
+   tokens de :root. Si falta algo, se añade primero como token.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. TOKENS
+   -------------------------------------------------------------------------- */
+:root{
+  /* ---- PALETA DE MARCA · Manual de Marca Prodesa, pág. 16 ---------------
+     Valores oficiales. No se aclaran, no se saturan, no se sustituyen.    */
+  --naranja:#F47920;        /* Pantone 158C  · CMYK 0/65/100/0  · acción, acento, activo */
+  --ladrillo:#D1581C;       /* Pantone 180C  · CMYK 0/75/100/15 · hover, eslogan         */
+  --ladrillo-osc:#BC3D19;   /* Pantone 1805C · CMYK 13/78/100/3 · énfasis cálido         */
+  --ocre:#E5A812;           /* Pantone 131C  · CMYK 0/30/100/10 · destacado              */
+  --gris:#58595B;           /* Pantone Black 7C · CMYK 0/0/0/80 · "Gris Prodesa":
+                               sidebar, encabezados de tabla, títulos                    */
+  --gris-marca-claro:#E6E7E8; /* Pantone Cool Gray 2C · CMYK 0/0/0/10 · fondo neutro     */
+
+  /* ---- DERIVADOS DE INTERFAZ (no están en el manual) --------------------
+     Tintes y neutros que la UI necesita y el manual no define. Se derivan
+     de la paleta de marca y quedan subordinados a ella.                   */
+  --naranja-osc:#D1581C;    /* = Ladrillo. Hover de toda acción naranja  */
+  --naranja-claro:#FDEFE4;  /* tinte 12% de Naranja · fila seleccionada  */
+  --gris-osc:#3F3F41;       /* texto fuerte, cifras                      */
+  --gris-claro:#8A8A8D;     /* texto secundario y labels.
+                               OJO: NO es el "Gris Claro" del manual,
+                               que es --gris-marca-claro                  */
+
+  /* Superficies */
+  --fondo:#F4F2EE;          /* fondo de página (neutro cálido)           */
+  --panel:#FFFFFF;          /* tarjetas, paneles                         */
+  --borde:#E2DFD8;          /* borde estándar                            */
+  --texto:#3F3F41;          /* texto base                                */
+
+  /* ---- FUNCIONALES DE DATOS (fuera del manual) --------------------------
+     El manual gobierna la marca, no la lectura de datos. Estos colores
+     existen solo para codificar estado; nunca para decorar.              */
+  --verde:#548235;          /* bien / ahorro / a favor                   */
+  --rojo:#C00000;           /* error / sobrecosto / en contra            */
+  --azul:#1F4E79;           /* SOLO el estado "revisado" (.pill.rv)      */
+  --pastel:#BDD7EE;         /* fila revisada                             */
+  --amarillo:#FFF3C4;       /* fila parcial / advertencia (tinte de Ocre)*/
+
+  /* Sidebar (superficies oscuras) */
+  --side-bg:#58595B;        /* = Gris Prodesa                            */
+  --side-campo:#4C4C4F;     /* inputs, selects, cajas dentro del sidebar */
+  --side-borde:#6A6A6D;
+  --side-texto:#E0E0E2;
+  --side-tenue:#A9A9AC;
+
+  /* Tipografía — la tipografía de marca es Roboto (manual, pág. 23).
+     Se usa si está instalada; si no, se degrada a Segoe UI. Sin webfonts
+     externas: estas apps deben funcionar sin conexión.                    */
+  --font:Roboto,"Segoe UI",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,Consolas,monospace;
+  --fs-base:13px;
+  --lh-base:1.45;
+
+  /* Logo — mínimo digital de 50px de ancho (manual, pág. 15) */
+  --logo-h:48px;
+
+  /* Forma */
+  --radio:3px;              /* radio ÚNICO de la interfaz                */
+  --radio-xs:2px;           /* badges, pills, barras                     */
+  --trans:.12s;             /* transición ÚNICA                          */
+}
+
+/* --------------------------------------------------------------------------
+   2. BASE
+   -------------------------------------------------------------------------- */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--fondo);
+  color:var(--texto);
+  font-family:var(--font);
+  font-size:var(--fs-base);
+  line-height:var(--lh-base);
+}
+
+/* Accesibilidad: foco visible coherente con la marca */
+a:focus-visible,button:focus-visible,input:focus-visible,
+select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--naranja);
+  outline-offset:1px;
+}
+
+/* --------------------------------------------------------------------------
+   3. HEADER
+   Markup: <header><img class="logo"><div class="hbar"></div>
+             <div class="htxt"><div class="eyebrow">…</div><h1>…</h1></div>
+             <div class="tagline">…</div></header>
+   -------------------------------------------------------------------------- */
+header{
+  background:#fff;
+  border-bottom:2px solid var(--gris);
+  position:relative;
+  display:flex;align-items:center;gap:18px;
+  padding:10px 24px;
+}
+/* Acento naranja bajo el logo — firma visual del estándar */
+header::after{
+  content:"";position:absolute;left:0;bottom:-2px;
+  width:78px;height:2px;background:var(--naranja);
+}
+/* El logo nunca baja de 50px de ancho, ni siquiera en móvil (manual pág. 15).
+   object-fit evita que min-width lo deforme. El gap:18px del header es el
+   área de reserva (1x = ancho de la "P" de Prodesa). */
+.logo{height:var(--logo-h);width:auto;min-width:50px;object-fit:contain;flex:0 0 auto;display:block}
+.hbar{width:1px;height:34px;background:var(--borde)}
+.htxt .eyebrow{
+  font-size:9.5px;letter-spacing:1.6px;color:var(--gris-claro);
+  text-transform:uppercase;font-weight:600;
+}
+.htxt h1{
+  margin:1px 0 0;font-size:18px;font-weight:600;
+  color:var(--naranja);letter-spacing:.2px;
+}
+/* Eslogan: SIEMPRE en Ladrillo y SIEMPRE sin itálica (manual, págs. 17 y 34) */
+.tagline{
+  margin-left:auto;font-size:12px;
+  color:var(--ladrillo);white-space:nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   4. LAYOUT
+   Markup: <div class="wrap"><aside class="side">…</aside>
+                             <main class="main">…</main></div>
+   -------------------------------------------------------------------------- */
+.wrap{
+  display:flex;gap:26px;align-items:flex-start;
+  padding:26px 24px 60px;max-width:1680px;margin:0 auto;
+}
+.side{
+  width:308px;flex:0 0 308px;
+  background:var(--side-bg);border-radius:var(--radio);
+  padding:16px;color:#fff;
+  position:sticky;top:16px;
+  max-height:calc(100vh - 40px);overflow-y:auto;
+}
+.side::-webkit-scrollbar{width:8px}
+.side::-webkit-scrollbar-thumb{background:#6f6f72;border-radius:4px}
+.main{flex:1 1 auto;min-width:0}
+
+@media(max-width:1000px){
+  .wrap{flex-direction:column}
+  .side{width:100%;flex:none;position:static;max-height:none}
+}
+
+/* --------------------------------------------------------------------------
+   5. SIDEBAR (panel de control / entradas)
+   -------------------------------------------------------------------------- */
+.side h2{
+  margin:0 0 3px;font-size:11px;letter-spacing:1.1px;
+  text-transform:uppercase;color:var(--naranja);font-weight:700;
+}
+.side h2 .chev{color:var(--naranja);margin-right:4px}
+.side .sub{font-size:11px;color:#CFCFD1;margin:0 0 14px;line-height:1.4}
+.side label.lbl{display:block;font-size:11.5px;font-weight:700;margin:0 0 6px;color:#fff}
+
+/* 5.1 Selector de modo — botones segmentados */
+.modo{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.modo.m3{grid-template-columns:1fr 1fr 1fr}
+.modo.m3 button{font-size:11px;padding:9px 2px}
+.modo.m3 button small{font-size:9px}
+.modo button{
+  background:var(--side-campo);border:1.5px solid var(--side-borde);color:#D8D8DA;
+  border-radius:var(--radio);padding:9px 4px;cursor:pointer;
+  font-family:inherit;font-size:12px;font-weight:700;letter-spacing:.4px;
+  transition:var(--trans);
+}
+.modo button small{
+  display:block;font-weight:400;font-size:9.5px;color:#A9A9AC;
+  margin-top:2px;letter-spacing:0;
+}
+.modo button:hover{border-color:var(--naranja)}
+.modo button.on{background:var(--naranja);border-color:var(--naranja);color:#fff}
+.modo button.on small{color:#FFE6D2}
+
+/* 5.2 Dropzone de archivos */
+.drop{
+  border:1.5px dashed #85858A;border-radius:var(--radio);
+  padding:14px 8px;text-align:center;cursor:pointer;
+  margin-bottom:14px;transition:var(--trans);background:rgba(255,255,255,.02);
+}
+.drop:hover,.drop.over{border-color:var(--naranja);background:rgba(240,124,34,.10)}
+.drop .ic{font-size:19px;line-height:1;opacity:.75}
+.drop .txt{font-size:10.5px;color:#BFBFC2;margin-top:5px;word-break:break-word}
+.drop.has{border-style:solid;border-color:var(--naranja);background:rgba(240,124,34,.10)}
+.drop.has .txt{color:#fff}
+
+/* 5.3 Lista de archivos cargados */
+.flist{list-style:none;margin:-8px 0 14px;padding:0;font-size:10.5px}
+.flist li{
+  display:flex;gap:6px;align-items:center;background:var(--side-campo);
+  border-radius:var(--radio-xs);padding:4px 6px;margin-bottom:3px;
+}
+.flist li span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#E4E4E6}
+.flist li b{color:var(--naranja);font-weight:600;font-size:9.5px}
+.flist li button{
+  background:none;border:none;color:#B9B9BC;cursor:pointer;
+  font-size:13px;line-height:1;padding:0 2px;
+}
+.flist li button:hover{color:var(--naranja)}
+
+/* 5.4 Opción tipo radio */
+.opt{
+  display:flex;gap:9px;align-items:flex-start;
+  background:var(--side-campo);border:1.5px solid var(--side-borde);
+  border-radius:var(--radio);padding:9px 10px;margin-bottom:8px;
+  cursor:pointer;transition:var(--trans);
+}
+.opt:hover{border-color:#8d8d92}
+.opt.on{border-color:var(--naranja)}
+.opt .dot{
+  width:13px;height:13px;border-radius:50%;border:2px solid #9A9A9E;
+  flex:0 0 auto;margin-top:1px;position:relative;
+}
+.opt.on .dot{border-color:var(--naranja)}
+.opt.on .dot::after{content:"";position:absolute;inset:2px;border-radius:50%;background:var(--naranja)}
+.opt .t{font-size:11.5px;font-weight:700;color:#fff}
+.opt .d{font-size:10px;color:#AFAFB2;margin-top:1px}
+
+/* 5.5 Campos dentro del sidebar */
+.side input[type=text]{
+  width:100%;background:var(--side-campo);border:1.5px solid var(--side-borde);
+  border-radius:var(--radio);color:#fff;padding:8px 9px;
+  font-family:inherit;font-size:11.5px;margin-bottom:14px;
+}
+.side input[type=text]::placeholder{color:#8F8F93}
+.side select{
+  width:100%;background:var(--side-campo);border:1.5px solid var(--side-borde);
+  border-radius:var(--radio);color:#fff;padding:6px;
+  font-family:inherit;font-size:11px;margin-bottom:10px;
+}
+
+/* 5.6 Lista de checkboxes con scroll */
+.caps{
+  max-height:150px;overflow-y:auto;background:var(--side-campo);
+  border:1.5px solid var(--side-borde);border-radius:var(--radio);
+  padding:7px 8px;margin-bottom:14px;
+}
+.caps label{
+  display:flex;gap:6px;align-items:center;font-size:10.5px;
+  color:var(--side-texto);padding:1.5px 0;cursor:pointer;
+}
+.caps label.all{
+  border-bottom:1px solid var(--side-borde);padding-bottom:5px;
+  margin-bottom:4px;font-weight:700;color:#fff;
+}
+.caps input{accent-color:var(--naranja);width:12px;height:12px;flex:0 0 auto}
+
+/* 5.7 Botón principal (una sola acción primaria por pantalla) */
+.btn{
+  width:100%;background:var(--naranja);border:none;border-radius:var(--radio);
+  color:#fff;font-family:inherit;font-size:13.5px;font-weight:700;
+  padding:11px;cursor:pointer;transition:var(--trans);letter-spacing:.2px;
+}
+.btn:hover{background:var(--naranja-osc)}
+.btn:disabled{background:#6E6E71;cursor:not-allowed;color:#B5B5B8}
+.hint{font-size:10px;color:var(--side-tenue);margin-top:9px;text-align:center;line-height:1.4}
+
+/* --------------------------------------------------------------------------
+   6. TARJETAS Y CONTENIDO PRINCIPAL
+   -------------------------------------------------------------------------- */
+.card{
+  background:var(--panel);border:1px solid var(--borde);
+  border-radius:var(--radio);padding:18px 20px;margin-bottom:18px;
+}
+.card h3{margin:0 0 12px;font-size:13px;font-weight:700;color:var(--gris)}
+.card h3 .tag{font-weight:400;color:var(--gris-claro);font-size:11px;margin-left:6px}
+.intro p{margin:0 0 12px}
+.intro p:last-child{margin-bottom:0}
+.intro b{color:var(--gris-osc)}
+.badge{
+  display:inline-block;background:var(--naranja);color:#fff;
+  border-radius:var(--radio-xs);padding:1px 6px;font-size:10px;font-weight:700;
+  letter-spacing:.4px;margin-right:6px;vertical-align:1px;
+}
+
+/* --------------------------------------------------------------------------
+   7. KPIs
+   Markup: <div class="kpis"><div class="kpi g">
+             <div class="k">Etiqueta</div><div class="v">1.234</div>
+             <div class="s">nota</div></div></div>
+   Modificadores: .g verde · .r rojo · .b gris (neutro) · (sin clase) naranja
+   -------------------------------------------------------------------------- */
+.kpis{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:14px;margin-bottom:18px;
+}
+.kpi{
+  background:#fff;border:1px solid var(--borde);
+  border-left:3px solid var(--naranja);border-radius:var(--radio);
+  padding:13px 15px;
+}
+.kpi .k{
+  font-size:10px;text-transform:uppercase;letter-spacing:.9px;
+  color:var(--gris-claro);font-weight:600;
+}
+.kpi .v{
+  font-size:21px;font-weight:700;color:var(--gris-osc);
+  margin-top:3px;letter-spacing:-.3px;
+}
+.kpi .s{font-size:11px;color:var(--gris-claro);margin-top:1px}
+.kpi.g{border-left-color:var(--verde)} .kpi.g .v{color:var(--verde)}
+.kpi.r{border-left-color:var(--rojo)}  .kpi.r .v{color:var(--rojo)}
+/* .b = KPI neutro/informativo (ni bueno ni malo). Va en Gris Prodesa;
+   se conserva la letra "b" por compatibilidad con las apps existentes. */
+.kpi.b{border-left-color:var(--gris)}  .kpi.b .v{color:var(--gris)}
+
+/* --------------------------------------------------------------------------
+   8. TABS
+   Markup: <div class="tabs"><button class="on">A</button><button>B</button></div>
+           <div class="tabpane on">…</div><div class="tabpane">…</div>
+   -------------------------------------------------------------------------- */
+.tabs{display:flex;gap:2px;border-bottom:2px solid var(--borde);margin-bottom:0}
+.tabs button{
+  background:none;border:none;border-bottom:2px solid transparent;
+  margin-bottom:-2px;padding:8px 14px;cursor:pointer;
+  font-family:inherit;font-size:12px;font-weight:600;color:var(--gris-claro);
+}
+.tabs button:hover{color:var(--gris)}
+.tabs button.on{color:var(--naranja);border-bottom-color:var(--naranja)}
+.tabpane{display:none}
+.tabpane.on{display:block}
+
+/* --------------------------------------------------------------------------
+   9. TOOLBAR Y BOTONES SECUNDARIOS
+   -------------------------------------------------------------------------- */
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 10px}
+.toolbar input[type=text],.toolbar select{
+  border:1px solid var(--borde);border-radius:var(--radio);padding:6px 9px;
+  font-family:inherit;font-size:12px;background:#fff;color:var(--texto);
+}
+.toolbar input[type=text]{min-width:230px}
+.toolbar .sp{margin-left:auto}   /* empuja a la derecha lo que siga */
+
+.btn-s{
+  background:var(--naranja);border:none;border-radius:var(--radio);color:#fff;
+  font-family:inherit;font-size:11.5px;font-weight:700;padding:7px 14px;cursor:pointer;
+}
+.btn-s:hover{background:var(--naranja-osc)}
+.btn-s.gh{background:#fff;color:var(--gris);border:1px solid var(--borde)}   /* ghost */
+.btn-s.gh:hover{background:#F6F4F0;border-color:var(--naranja);color:var(--naranja)}
+
+/* --------------------------------------------------------------------------
+   10. TABLAS
+   Markup: <div class="tw"><table>…</table></div>
+   Celdas: td.n numérica (derecha, tabular) · td.c centrada
+   Filas:  tr.tot total · tr.sel seleccionada · tr.rev revisada · tr.par parcial
+   -------------------------------------------------------------------------- */
+.tw{overflow:auto;max-height:560px;border:1px solid var(--borde);border-radius:var(--radio)}
+table{border-collapse:collapse;width:100%;font-size:11.5px}
+th{
+  background:var(--gris);color:#fff;font-weight:600;text-align:left;
+  padding:7px 9px;position:sticky;top:0;z-index:2;
+  white-space:nowrap;font-size:10.5px;
+}
+th.s{cursor:pointer;user-select:none}      /* columna ordenable */
+th.s:hover{background:var(--gris-osc)}
+th .ar{opacity:.5;font-size:9px}           /* flecha de orden */
+td{padding:5px 9px;border-bottom:1px solid #EFEDE8;vertical-align:top}
+tbody tr:hover{background:#FAF8F4}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.c{text-align:center}
+tr.tot td{background:#EDEAE3;font-weight:700;border-top:2px solid var(--gris)}
+tbody tr.sel td{background:var(--naranja-claro);box-shadow:inset 3px 0 0 var(--naranja)}
+tbody tr.sel:hover td{background:var(--naranja-claro)}
+tr.rev td{background:var(--pastel)}
+tr.par td{background:var(--amarillo)}
+
+/* --------------------------------------------------------------------------
+   11. PANEL DE DETALLE (maestro-detalle bajo la tabla)
+   -------------------------------------------------------------------------- */
+.det{
+  margin-top:16px;border:1px solid var(--borde);border-top:3px solid var(--naranja);
+  border-radius:var(--radio);background:#FDFCFA;padding:14px 16px;
+}
+.det .dh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.det .dh b{font-size:14px;color:var(--gris-osc)}
+.det .dh .m{font-size:11px;color:var(--gris-claro)}
+.det .dh .x{
+  margin-left:auto;background:none;border:1px solid var(--borde);
+  border-radius:var(--radio);color:var(--gris-claro);cursor:pointer;
+  font-family:inherit;font-size:11px;padding:3px 9px;
+}
+.det .dh .x:hover{border-color:var(--naranja);color:var(--naranja)}
+.det h4{
+  margin:14px 0 6px;font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.7px;color:var(--gris);
+}
+.det h4:first-of-type{margin-top:10px}
+
+/* Chips de valores (.prs span.w = destacado) */
+.prs{font-size:10.5px;line-height:1.6}
+.prs span{
+  display:inline-block;background:#F0EEE9;border-radius:var(--radio-xs);
+  padding:0 5px;margin:0 3px 2px 0;white-space:nowrap;color:var(--gris);
+}
+.prs span.w{background:var(--naranja);color:#fff;font-weight:700}
+
+/* --------------------------------------------------------------------------
+   12. TEXTOS AUXILIARES Y AVISOS
+   -------------------------------------------------------------------------- */
+.click{font-size:11px;color:var(--gris-claro);margin:12px 0 8px}
+.click b{color:var(--naranja)}
+.tdesc{
+  font-size:11.5px;color:var(--gris);background:#FBFAF7;
+  border-left:3px solid var(--naranja);border-radius:0 var(--radio) var(--radio) 0;
+  padding:9px 12px;margin:14px 0 4px;line-height:1.5;
+}
+.tdesc b{color:var(--gris-osc)}
+.note{font-size:11px;color:var(--gris-claro);margin-top:9px}
+.empty{text-align:center;color:var(--gris-claro);padding:34px 10px;font-size:12px}
+
+/* Alerta bloqueante (roja, ancho completo) */
+.bigalert{background:var(--rojo);color:#fff;border-radius:var(--radio);padding:18px 22px;margin-bottom:18px}
+.bigalert .t{font-size:20px;font-weight:700;letter-spacing:.5px;line-height:1.25}
+.bigalert .d{font-size:13px;margin-top:8px;color:#FFE0E0}
+.bigalert code{background:rgba(255,255,255,.18);border-radius:var(--radio-xs);padding:1px 5px}
+
+/* Dato destacado tipo "fecha de corte" */
+.fechabox{
+  background:#FFF200;color:var(--gris-osc);border:1px solid #D9CE00;
+  border-radius:var(--radio);padding:14px 20px;margin-bottom:18px;
+}
+.fechabox .t{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;font-weight:700;color:#6B6400}
+.fechabox .v{font-size:24px;font-weight:700;margin-top:2px;letter-spacing:-.3px}
+.fechabox .s{font-size:11.5px;color:#5C5600;margin-top:2px}
+
+/* Error en línea */
+.err{
+  background:#FCEDED;border:1px solid #E9BDBD;color:#8B1A1A;
+  border-radius:var(--radio);padding:10px 13px;margin-bottom:14px;font-size:12px;
+}
+
+/* --------------------------------------------------------------------------
+   13. ESTADOS Y ETIQUETAS
+   -------------------------------------------------------------------------- */
+.pos{color:var(--rojo);font-weight:600}    /* variación al alza = sobrecosto */
+.neg{color:var(--verde);font-weight:600}   /* variación a la baja = ahorro   */
+.pill{
+  display:inline-block;border-radius:var(--radio-xs);padding:1px 6px;
+  font-size:9.5px;font-weight:700;letter-spacing:.3px;
+}
+.pill.ok{background:#E4EFDA;color:var(--verde)}
+.pill.no{background:#F7DDDD;color:var(--rojo)}
+.pill.rv{background:var(--pastel);color:var(--azul)}
+
+/* --------------------------------------------------------------------------
+   14. BARRAS COMPARATIVAS
+   Markup: <div class="bars"><div class="bar">
+             <div class="nm">Nombre</div>
+             <div class="tr"><div class="f1" style="width:70%"></div>
+                             <div class="f2" style="width:45%"></div></div>
+             <div class="vv">1.234</div></div></div>
+   -------------------------------------------------------------------------- */
+.bars{margin-top:4px}
+.bar{
+  display:grid;grid-template-columns:200px 1fr 120px;gap:10px;
+  align-items:center;padding:3px 0;font-size:11px;
+}
+.bar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gris)}
+.bar .tr{background:#F0EEE9;border-radius:var(--radio-xs);height:17px;position:relative;overflow:hidden}
+.bar .f1,.bar .f2{position:absolute;left:0;top:0;height:100%;border-radius:var(--radio-xs)}
+.bar .f1{background:var(--gris);opacity:.85}                             /* serie base     */
+.bar .f2{background:var(--naranja);height:7px;top:5px;border-radius:1px} /* serie comparada*/
+.bar .vv{text-align:right;font-variant-numeric:tabular-nums;color:var(--gris-claro)}
+
+/* Leyenda */
+.leg{display:flex;gap:16px;font-size:10.5px;color:var(--gris-claro);margin:2px 0 10px}
+.leg i{display:inline-block;width:11px;height:9px;border-radius:1px;margin-right:5px;vertical-align:0}
+
+/* --------------------------------------------------------------------------
+   15. LOG Y PROGRESO
+   -------------------------------------------------------------------------- */
+.log{
+  background:#FBFAF7;border:1px solid var(--borde);border-radius:var(--radio);
+  padding:9px 12px;font-size:11px;color:var(--gris);
+  max-height:130px;overflow:auto;font-family:var(--font-mono);margin-top:12px;
+}
+.log .e{color:var(--rojo)}          /* error   */
+.log .w{color:var(--naranja-osc)}   /* aviso   */
+.log .o{color:var(--verde)}         /* ok      */
+
+.spin{
+  display:inline-block;width:13px;height:13px;
+  border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:6px;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
